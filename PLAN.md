@@ -12,7 +12,7 @@
 |---|---|---|
 | A | _______ | LangGraph graph, nodes, tools, prompts (`backend/app/graph.py`, `tools.py`, `guard.py`) |
 | B | _______ | FastAPI, Neon Postgres, memory, isolation, deploy to HF Spaces, benchmark runner |
-| C | _______ | Seed data, Vercel website (customer page + admin dashboard), README, demo video, form |
+| C | _______ | Seed data, README, demo video, form |
 
 ---
 
@@ -30,7 +30,7 @@
 - [ ] **B:** put the group key in `backend/.env`, run `python run_local.py`, chat through the demo flow
 - [ ] **B:** Neon project → HF Space (secrets) → `git subtree push --prefix backend space main` (see `docs/DEPLOY.md`)
 - [ ] **A:** run `python tests/run_bench.py --url <local or live URL>`, tune `app/prompts.py` until the 10 + 5 pass
-- [ ] **C:** set `frontend/config.js` to the Space URL, deploy `frontend/` on Vercel, check `/admin`
+- [ ] Website: set `frontend/config.js` to the Space URL, deploy `frontend/` on Vercel, check `/admin`
 - [ ] **C:** record demo GIF (`docs/demo.gif`) + 2–3 min video; fill links at the top of `README.md`
 - [ ] **A/B:** paste the live benchmark table into `README.md`; set the `API_URL` repo variable for keep-alive
 - [ ] **Leader:** submit the Google Form + Classroom (form answers in section 11)
@@ -386,13 +386,15 @@ propcloser/
 
 The scaffold is built (section 0), so the day is about running it with the real key, deploying and polishing.
 
-| By | A (graph) | B (API + infra) | C (web + docs) |
+| By | A (graph) | B (API + infra) | C (docs + demo) |
 |---|---|---|---|
-| 18:00 | Run locally with the key; try the demo flow | Neon project + HF Space with secrets | Read the site code; tweak copy/branding |
-| 19:00 | `run_bench.py` locally; fix prompt/tool issues | **API live on HF Spaces**, `/health` ok | `config.js` → Space URL; **site live on Vercel** |
+| 18:00 | Run locally with the key; try the demo flow | Neon project + HF Space with secrets | Review seed listings; draft form answers |
+| 19:00 | `run_bench.py` locally; fix prompt/tool issues | **API live on HF Spaces**, `/health` ok | Video script + README wording |
 | 20:30 | Re-run benchmark on the live URL | Keep-alive variable, check Neon tables fill up | Demo GIF + start recording the video |
 | 21:30 | **Feature freeze.** Only bug fixes after this | Final deploy | README links + benchmark table |
 | 23:00 | — | — | **Submit form + Classroom** (leader) |
+
+The website goes live on Vercel as soon as the API URL exists (`docs/DEPLOY.md` §3).
 
 Cut order if late: follow-ups → installment calculator → dashboard polish. Never cut: `/chat` contract, memory, isolation, safety.
 
