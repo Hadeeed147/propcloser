@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PropCloser · Agency dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="admin.css">
+  <script src="config.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
+      </span>
+      PropCloser <span class="crumb">Agency dashboard</span>
+    </a>
+    <nav>
+      <span class="updated" id="updated"></span>
+      <button class="btn btn-ghost btn-sm" id="refresh" type="button">Refresh</button>
+      <button class="btn btn-ghost btn-sm" id="logout" type="button">Lock</button>
+      <a class="btn btn-ghost btn-sm" href="./">Customer site</a>
+    </nav>
+  </header>
+
+  <main class="dash">
+    <section id="gate" class="gate" hidden>
+      <div class="gate-card">
+        <h2>Agency sign-in</h2>
+        <p>Enter the admin token (the <code>ADMIN_TOKEN</code> set on the API).</p>
+        <form id="gate-form">
+          <input id="token" type="password" placeholder="Admin token" autocomplete="current-password" required>
+          <button class="btn btn-primary" type="submit">Open dashboard</button>
+        </form>
+        <p class="gate-error" id="gate-error"></p>
+      </div>
+    </section>
+
+    <section id="board" hidden>
+      <div class="stats">
+        <div class="stat"><span>Leads</span><b id="s-leads">0</b></div>
+        <div class="stat"><span>Qualified</span><b id="s-qualified">0</b></div>
+        <div class="stat"><span>Visits booked</span><b id="s-visits">0</b></div>
+        <div class="stat warn"><span>Follow-ups to approve</span><b id="s-followups">0</b></div>
+      </div>
+
+      <h2 class="dash-title">Lead pipeline</h2>
+      <div class="kanban">
+        <div class="col"><div class="col-head"><span class="dot new"></span>New <em id="c-new">0</em></div><div class="col-body" id="k-new"></div></div>
+        <div class="col"><div class="col-head"><span class="dot qualified"></span>Qualified <em id="c-qualified">0</em></div><div class="col-body" id="k-qualified"></div></div>
+        <div class="col"><div class="col-head"><span class="dot booked"></span>Visit booked <em id="c-visit_booked">0</em></div><div class="col-body" id="k-visit_booked"></div></div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <h2 class="dash-title">Site visits</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Listing</th><th>When</th><th>Lead</th><th>Status</th></tr></thead>
+            <tbody id="visits"></tbody>
+          </table></div>
+        </div>
+        <div class="panel">
+          <h2 class="dash-title">Follow-ups awaiting approval</h2>
+          <p class="hint">The agent never messages a lead on its own. Approve or reject each follow-up.</p>
+          <div id="followups" class="followups"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

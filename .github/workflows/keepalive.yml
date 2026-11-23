@@ -1,0 +1,16 @@
+name: keep-alive
+
+# Pings the deployed API so it stays warm during evaluation (Tue 24 – Wed 25 Nov).
+# Set the repository variable API_URL (Settings → Secrets and variables → Actions → Variables),
+# e.g. https://your-name-propcloser-api.hf.space
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.API_URL != '' }}
+    steps:
+      - run: curl -fsS --max-time 60 "${{ vars.API_URL }}/health" && echo

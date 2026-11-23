@@ -1,0 +1,21 @@
+# Optional: deploy the API on Render instead of Hugging Face Spaces (Blueprint).
+# Render's free tier sleeps after ~15 min idle; the keep-alive workflow pings /health to reduce cold starts.
+services:
+  - type: web
+    name: propcloser-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: MODEL
+        value: claude-haiku-5-5
+      - key: PORT
+        value: "7860"
