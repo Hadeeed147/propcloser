@@ -269,10 +269,11 @@ async def cancel_visit(runtime: ToolRuntime[Ctx], visit_id: Optional[int] = None
 
 @tool
 async def my_visits(runtime: ToolRuntime[Ctx]) -> str:
-    """This lead's own visits with ids and status."""
-    visits = await get_repo().user_visits(runtime.context.user_id)
+    """This lead's own upcoming visits with ids and status."""
+    visits = [v for v in await get_repo().user_visits(runtime.context.user_id)
+              if v["status"] != "cancelled" and v["slot_time"] > now_pkt()]
     if not visits:
-        return "This lead has no visits yet."
+        return "This lead has no upcoming visits."
     return "\n".join(f"Visit #{v['id']}: {visit_label(v)} — {v['status']}" for v in visits)
 
 

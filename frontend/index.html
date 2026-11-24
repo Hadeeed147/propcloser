@@ -2,122 +2,115 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PropCloser · Islamabad homes, answered in seconds</title>
-  <meta name="description" content="Chat with an AI property agent that finds Islamabad listings, works out installments and books your site visit.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PropCloser · Homes in Islamabad, sector by sector</title>
+  <meta name="description" content="Tell our AI assistant the sector and budget. It finds matching homes in Islamabad and books your visit once you say yes.">
+  <meta name="theme-color" content="#00683f">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
 </head>
 <body>
+  <a class="skip" href="#listings">Skip to homes</a>
+
   <header class="topbar">
-    <a class="brand" href="./">
-      <span class="brand-mark" aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
-      </span>
-      PropCloser
-    </a>
-    <nav>
-      <a href="#listings">Listings</a>
+    <a class="brand" href="./"><span class="sign" aria-hidden="true">PC</span>PropCloser</a>
+    <nav aria-label="Main">
+      <a href="#listings">Homes</a>
       <a href="#how">How it works</a>
-      <a class="btn btn-ghost btn-sm" href="admin.html">Agency dashboard</a>
+      <a href="admin.html">For agencies</a>
     </nav>
   </header>
 
   <main>
-    <section class="hero">
-      <div>
-        <span class="pill">AI property agent · replies in seconds</span>
-        <h1>Find your next home in <span class="hl">Islamabad</span></h1>
-        <p>Tell our agent what you need. It shortlists listings that fit your budget, works out monthly installments and books your site visit — any time of day.</p>
-        <div class="cta">
-          <button class="btn btn-primary" data-open-chat>Chat with an agent</button>
-          <a class="btn btn-ghost" href="#listings">Browse listings</a>
-        </div>
-        <div class="hero-stats">
-          <div><b id="stat-count">30+</b><span>verified listings</span></div>
-          <div><b>&lt; 5s</b><span>first reply</span></div>
-          <div><b>24/7</b><span>visit booking</span></div>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Which sector is home?</h1>
+        <p>Say it your way, in English or Roman Urdu. Our AI assistant finds homes that fit, works out the monthly installment and holds a visit for you. Nothing is booked until you say yes.</p>
+        <form class="ask" id="ask-form">
+          <label for="ask-text">What are you looking for?</label>
+          <div class="ask-row">
+            <input id="ask-text" placeholder="3 bed ghar, B-17, dedh crore" autocomplete="off" maxlength="500" enterkeyhint="send">
+            <button class="btn btn-primary" type="submit">Find homes</button>
+          </div>
+        </form>
+        <div class="examples" id="examples" role="group" aria-label="Examples to try">
+          <button type="button">3 bed house in Bahria Town under 3 crore</button>
+          <button type="button">E-11 mein flat rent pe, 1.2 lakh tak</button>
+          <button type="button">Installment on a 2 crore house</button>
         </div>
       </div>
-      <div class="hero-card" aria-hidden="true">
-        <div class="mini-head"><div class="avatar" style="background:var(--brand);color:#fff">PC</div><div><b>PropCloser agent</b><div class="online" style="color:var(--muted)">Online</div></div></div>
-        <div class="bubble user-msg">3-bed house in Bahria under 3 crore, can I visit this weekend?</div>
-        <div class="bubble agent-msg">I found a <b>7 marla family house in Bahria Town Phase 8</b> for PKR 2.4 crore. Saturday 11 AM or 3 PM are free — which works?</div>
-        <div class="tools"><span class="tool-chip">Searched listings</span><span class="tool-chip">Checked visit slots</span></div>
-        <div class="bubble user-msg">3 PM please</div>
-        <div class="bubble agent-msg">Just to confirm: shall I book Saturday 3:00 PM? Reply “yes” to confirm.</div>
-      </div>
+      <figure class="map-card">
+        <div id="map"></div>
+        <figcaption><span id="map-note">Choose a sector to see its homes.</span> <span class="fine">Schematic, not to scale.</span></figcaption>
+      </figure>
     </section>
 
-    <section id="listings" class="section">
+    <section id="listings" class="section" aria-labelledby="listings-title">
       <div class="section-head">
-        <h2>Available now</h2>
-        <p id="result-note">Loading listings…</p>
+        <h2 id="listings-title">Homes</h2>
+        <p id="result-note" role="status"></p>
       </div>
       <form id="filters" class="filters" autocomplete="off">
-        <div class="segmented" role="tablist">
-          <button type="button" class="active" data-purpose="sale">Buy</button>
-          <button type="button" data-purpose="rent">Rent</button>
+        <div class="segmented" role="group" aria-label="Buy or rent">
+          <button type="button" data-purpose="sale" aria-pressed="true">Buy</button>
+          <button type="button" data-purpose="rent" aria-pressed="false">Rent</button>
         </div>
-        <input id="f-area" list="areas" placeholder="Area, e.g. Bahria Town, G-13">
-        <datalist id="areas">
-          <option value="Bahria Town"><option value="Bahria Enclave"><option value="DHA Phase 2"><option value="DHA Phase 5">
-          <option value="F-7"><option value="F-11"><option value="E-11"><option value="G-11"><option value="G-13">
-          <option value="B-17"><option value="Top City 1"><option value="Pakistan Town"><option value="Park View City"><option value="Gulberg Residencia">
-        </datalist>
-        <select id="f-type"><option value="">Any type</option><option value="house">House</option><option value="flat">Flat</option><option value="plot">Plot</option></select>
-        <select id="f-beds"><option value="">Any beds</option><option value="1">1+ beds</option><option value="2">2+ beds</option><option value="3">3+ beds</option><option value="4">4+ beds</option><option value="5">5+ beds</option></select>
-        <select id="f-price"></select>
-        <button class="btn btn-primary" type="submit">Search</button>
+        <div class="field grow"><label for="f-area">Sector or area</label>
+          <input id="f-area" list="areas" placeholder="Any"><datalist id="areas"></datalist></div>
+        <div class="field"><label for="f-type">Type</label>
+          <select id="f-type"><option value="">Any</option><option value="house">House</option><option value="flat">Flat</option><option value="plot">Plot</option></select></div>
+        <div class="field"><label for="f-beds">Bedrooms</label>
+          <select id="f-beds"><option value="">Any</option><option value="1">1 or more</option><option value="2">2 or more</option><option value="3">3 or more</option><option value="4">4 or more</option><option value="5">5 or more</option></select></div>
+        <div class="field"><label for="f-price">Budget</label><select id="f-price"></select></div>
+        <button class="btn btn-primary" type="submit">Show homes</button>
+        <button class="btn btn-quiet" type="button" id="clear" hidden>Clear filters</button>
       </form>
-      <div id="grid" class="grid"></div>
+      <div id="grid" class="grid" aria-live="polite"></div>
     </section>
 
-    <section id="how" class="section">
-      <div class="section-head"><h2>How it works</h2></div>
-      <div class="how-grid">
-        <div class="step"><div class="num">1</div><h3>Tell us what you need</h3><p>Buy or rent, area, budget, bedrooms — in English or Roman Urdu. The agent remembers it next time.</p></div>
-        <div class="step"><div class="num">2</div><h3>Get matched in seconds</h3><p>It searches our listings, explains prices in lakh and crore, and estimates monthly installments.</p></div>
-        <div class="step"><div class="num">3</div><h3>Book a site visit</h3><p>Pick a slot and confirm. Nothing is booked until you say yes — and our team gets it instantly.</p></div>
-      </div>
+    <section id="how" class="section" aria-labelledby="how-title">
+      <div class="section-head"><h2 id="how-title">How it works</h2></div>
+      <ol class="steps">
+        <li><h3>Say what you need</h3><p>"Dedh crore", "kal 3 baje", "near a park". The assistant understands it and remembers it next time.</p></li>
+        <li><h3>See homes that fit</h3><p>Only real listings from this agency. If nothing fits, it says so and shows the closest.</p></li>
+        <li><h3>Say yes to a visit</h3><p>It holds a time and asks you first. You can move or cancel it in the same chat.</p></li>
+      </ol>
     </section>
   </main>
 
-  <footer>PropCloser · AI lead assistant for Islamabad real-estate agencies · Demo listings for the AI-4016 hackathon</footer>
+  <footer>
+    <p>PropCloser is a student project (AI-4016). The homes shown are sample data, not real offers.</p>
+  </footer>
 
-  <button class="chat-fab" data-open-chat aria-label="Open chat">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+  <button class="chat-fab" id="fab" type="button" aria-haspopup="dialog" aria-controls="chat">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+    <span>Ask the assistant</span>
   </button>
 
-  <aside class="chat" id="chat" aria-hidden="true" aria-label="Chat with PropCloser">
+  <section class="chat" id="chat" role="dialog" aria-modal="false" aria-labelledby="chat-title" inert>
     <header class="chat-head">
-      <div class="agent">
-        <div class="avatar">PC</div>
-        <div><b>PropCloser agent</b><span class="online">Online · replies instantly</span></div>
-      </div>
+      <div><h2 id="chat-title">Property assistant</h2><p>AI. It asks before it books anything.</p></div>
       <div class="chat-actions">
-        <button id="new-chat" type="button" title="Start a new conversation">New chat</button>
-        <button id="close-chat" type="button" aria-label="Close chat">✕</button>
+        <button id="new-chat" type="button">New chat</button>
+        <button id="close-chat" type="button" aria-label="Close chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
     </header>
-    <div class="chat-body" id="chat-body" aria-live="polite"></div>
-    <div class="chips" id="chips">
-      <button type="button">3-bed house in Bahria under 3 crore</button>
-      <button type="button">Flat for rent in E-11</button>
-      <button type="button">Installment on a 2 crore house?</button>
-      <button type="button">What visits have I booked?</button>
-    </div>
+    <div class="chat-body" id="chat-body" role="log" aria-live="polite" aria-label="Conversation" tabindex="0"></div>
+    <div class="quick" id="quick" role="group" aria-label="Suggested replies"></div>
     <form class="chat-input" id="chat-form">
-      <input id="chat-text" placeholder="Type your message…" autocomplete="off" maxlength="2000">
-      <button class="send" id="send" aria-label="Send">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-      </button>
+      <label class="sr" for="chat-text">Message</label>
+      <input id="chat-text" placeholder="Message" autocomplete="off" maxlength="2000" enterkeyhint="send">
+      <button class="send" id="send" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </form>
-  </aside>
+    <p class="chat-foot">It can make mistakes, so check details at the visit. It remembers your preferences, never phone or CNIC numbers.
+      <button type="button" data-say="What do you know about me?">See my data</button> <button type="button" data-say="Delete everything you know about me">Delete my data</button></p>
+  </section>
 
+  <script src="map.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

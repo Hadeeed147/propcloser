@@ -1,109 +1,91 @@
-// PropCloser agency dashboard: pipeline, visits and follow-up approvals (human-in-the-loop for sending).
+// PropCloser agency desk: approvals first (human-in-the-loop for sending), then leads, visits and costs.
 (() => {
   const store = {
-    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
-    del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+    get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } },
+    del(k) { try { sessionStorage.removeItem(k); } catch { /* ignore */ } },
   };
-  const API = (store.get("pc_api") || window.PROPCLOSER_API || "http://127.0.0.1:8000").replace(/\/$/, "");
+  let override = null;
+  try { override = localStorage.getItem("pc_api"); localStorage.removeItem("pc_admin_token"); } catch { /* ignore */ }
+  const API = (override || window.PROPCLOSER_API || "http://127.0.0.1:8000").replace(/\/$/, "");
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const pkr = (n) => (n == null ? null : n >= 1e7 ? `${+(n / 1e7).toFixed(2)} crore` : n >= 1e5 ? `${+(n / 1e5).toFixed(2)} lakh` : Number(n).toLocaleString());
-  const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "-");
-  const ago = (iso) => {
-    if (!iso) return "";
-    const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
-    return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`;
-  };
+  const pkr = (n) => (n >= 1e7 ? `${+(n / 1e7).toFixed(2)} crore` : n >= 1e5 ? `${+(n / 1e5).toFixed(2)} lakh` : Number(n).toLocaleString("en"));
+  const when = (iso) => new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Karachi", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+  const ago = (iso) => { const m = Math.max(0, (Date.now() - new Date(iso)) / 6e4); return m < 1 ? "just now" : m < 60 ? `${Math.floor(m)} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`; };
+  const STATUS = { pending: "Held, not confirmed", confirmed: "Confirmed", cancelled: "Cancelled", pending_approval: "Waiting", approved: "Approved", rejected: "Rejected" };
+  let token = store.get("pc_admin_token") || "", timer = null, names = {};
 
-  let token = store.get("pc_admin_token") || "";
-  let lastUpdate = null, timer = null;
+  const who = (id) => names[id] || `Lead ${String(id).replace(/^web-/, "").slice(0, 6)}`;
 
-  async function api(path, opts = {}) {
-    const res = await fetch(`${API}${path}`, { ...opts, headers: { "Content-Type": "application/json", "X-Admin-Token": token, ...(opts.headers || {}) } });
-    if (res.status === 401) throw Object.assign(new Error("unauthorized"), { status: 401 });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  async function api(path, body) {
+    const res = await fetch(API + path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": token }, body: body ? JSON.stringify(body) : undefined });
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
     return res.json();
   }
 
-  function showGate(msg = "") {
-    $("#gate").hidden = false; $("#board").hidden = true; $("#gate-error").textContent = msg;
+  function gate(message = "") {
     clearInterval(timer);
+    token = ""; store.del("pc_admin_token");
+    $("#gate").hidden = false; $("#board").hidden = true; $("#logout").hidden = true;
+    $("#gate-error").textContent = message; $("#token").value = ""; $("#token").focus();
   }
 
-  function leadCard(l) {
-    const kv = [
-      l.purpose && (l.purpose === "rent" ? "Rent" : "Buy"),
-      l.area, l.property_type, l.beds && `${l.beds} bed`,
-      l.budget_pkr && `PKR ${pkr(l.budget_pkr)}`, l.timeline, l.financing,
-    ].filter(Boolean);
-    return `<div class="lead"><b>${esc(l.name || l.user_id)}</b>
-      ${kv.length ? `<div class="row">${kv.map((x) => `<span class="kv">${esc(x)}</span>`).join("")}</div>` : '<small>Not qualified yet</small>'}
-      <small>Updated ${ago(l.updated_at)}</small></div>`;
+  function lead(l) {
+    const facts = [l.purpose && (l.purpose === "rent" ? "Rent" : "Buy"), l.area, l.property_type, l.beds && `${l.beds} bed`, l.budget_pkr && `PKR ${pkr(l.budget_pkr)}`, l.timeline, l.financing].filter(Boolean);
+    return `<div class="item"><b>${esc(who(l.user_id))}</b><p>${facts.map(esc).join(" · ") || "Nothing known yet"}</p><p class="fine">Active ${ago(l.updated_at)}</p></div>`;
+  }
+
+  function draft(f) {
+    const open = f.status === "pending_approval";
+    return `<div class="item ${open ? "waiting" : ""}"><b>To ${esc(who(f.user_id))}</b><p>${esc(f.message)}</p><div class="act">${open
+      ? `<button class="btn btn-primary" type="button" data-id="${f.id}" data-status="approved">Approve</button><button class="btn btn-quiet" type="button" data-id="${f.id}" data-status="rejected">Reject</button>`
+      : `<span class="tag ${esc(f.status)}">${STATUS[f.status] || esc(f.status)}</span>`}</div></div>`;
   }
 
   async function refresh() {
     try {
-      const [stats, leads, visits, followups] = await Promise.all([
-        api("/admin/stats"), api("/admin/leads"), api("/admin/visits"), api("/admin/followups"),
-      ]);
-      $("#gate").hidden = true; $("#board").hidden = false;
-      $("#s-leads").textContent = stats.leads; $("#s-qualified").textContent = stats.qualified;
-      $("#s-visits").textContent = stats.visits_booked; $("#s-followups").textContent = stats.followups_pending;
-
-      for (const status of ["new", "qualified", "visit_booked"]) {
-        const items = leads.filter((l) => l.status === status);
-        $(`#c-${status}`).textContent = items.length;
-        $(`#k-${status}`).innerHTML = items.length ? items.map(leadCard).join("") : '<div class="none">No leads</div>';
+      const [leads, visits, followups, usage] = await Promise.all([api("/admin/leads"), api("/admin/visits"), api("/admin/followups"), api("/admin/usage")]);
+      names = Object.fromEntries(leads.filter((l) => l.name).map((l) => [l.user_id, l.name]));
+      $("#gate").hidden = true; $("#board").hidden = false; $("#logout").hidden = false;
+      const open = followups.filter((f) => f.status === "pending_approval"), done = followups.filter((f) => f.status !== "pending_approval").slice(0, 3);
+      $("#todo-title").textContent = open.length ? `Waiting for you: ${open.length}` : "Nothing waiting for you";
+      $("#followups").innerHTML = [...open, ...done].map(draft).join("");
+      for (const s of ["new", "qualified", "visit_booked"]) {
+        const items = leads.filter((l) => l.status === s);
+        $(`#c-${s}`).textContent = items.length;
+        $(`#k-${s}`).innerHTML = items.map(lead).join("") || '<p class="empty">None yet</p>';
       }
-
-      $("#visits").innerHTML = visits.length
-        ? visits.map((v) => `<tr><td>#${v.listing_id} ${esc(v.title)}<br><small style="color:var(--muted)">${esc(v.area)}</small></td>
-            <td>${when(v.slot_time)}</td><td>${esc(v.user_id)}</td><td><span class="status ${esc(v.status)}">${esc(v.status)}</span></td></tr>`).join("")
-        : '<tr><td colspan="4" class="none">No visits yet</td></tr>';
-
-      const pending = followups.filter((f) => f.status === "pending_approval");
-      const done = followups.filter((f) => f.status !== "pending_approval").slice(0, 5);
-      $("#followups").innerHTML = (pending.length || done.length)
-        ? [...pending, ...done].map((f) => `<div class="fu"><p>${esc(f.message)}</p><div class="fu-meta">
-            <span>To ${esc(f.user_id)}</span><span>· due ${when(f.due_at)}</span>
-            ${f.status === "pending_approval"
-              ? `<div class="actions"><button class="btn btn-sm btn-ok" data-fu="${f.id}" data-status="approved">Approve</button>
-                 <button class="btn btn-sm btn-no" data-fu="${f.id}" data-status="rejected">Reject</button></div>`
-              : `<span class="status ${esc(f.status)}" style="margin-left:auto">${esc(f.status)}</span>`}
-          </div></div>`).join("")
-        : '<div class="none">Nothing waiting for approval</div>';
-
-      lastUpdate = Date.now(); tick();
+      $("#visits").innerHTML = visits.map((v) => `<tr><td>${when(v.slot_time)}</td><td>#${v.listing_id} ${esc(v.title)}<br><span class="fine">${esc(v.area)}</span></td><td>${esc(who(v.user_id))}</td><td><span class="tag ${esc(v.status)}">${STATUS[v.status] || esc(v.status)}</span></td></tr>`).join("") || '<tr><td colspan="4" class="empty">No visits yet</td></tr>';
+      const stat = (k, v) => `<div><span class="v">${v}</span><span class="k">${k}</span></div>`;
+      $("#usage").innerHTML = stat("spent of $" + usage.total_cap_usd.toFixed(2) + " cap", "$" + usage.total_usd.toFixed(4)) + stat("model calls", usage.model_calls) + stat("input read from cache", usage.cache_hit_rate == null ? "–" : Math.round(usage.cache_hit_rate * 100) + "%") + (usage.model_allowed ? "" : stat("assistant", "Paused by cap"));
+      $("#updated").textContent = `Updated ${new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
     } catch (e) {
-      if (e.status === 401) { store.del("pc_admin_token"); showGate(token ? "That token was rejected." : ""); }
-      else { $("#updated").textContent = `Can't reach API at ${API}`; }
+      if (e.status === 401) gate("That password isn't right. Try again.");
+      else if (e.status === 503) gate("The server has no agency password yet. Set ADMIN_TOKEN (12 or more characters) and restart it.");
+      else { console.error("PropCloser API", API, e); if ($("#board").hidden) gate("The server can't be reached. Check your connection, then try again."); else $("#updated").textContent = "Can't update right now. Retrying."; }
     }
   }
 
-  function tick() {
-    if (lastUpdate) $("#updated").textContent = `Updated ${Math.round((Date.now() - lastUpdate) / 1000)}s ago`;
-  }
+  function start() { clearInterval(timer); refresh(); timer = setInterval(() => { if (!document.hidden && !$("#followups").contains(document.activeElement)) refresh(); }, 10000); }
 
-  $("#gate-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    token = $("#token").value.trim(); store.set("pc_admin_token", token); start();
+  $("#gate-form").addEventListener("submit", (e) => { e.preventDefault(); token = $("#token").value.trim(); store.set("pc_admin_token", token); start(); });
+  $("#logout").addEventListener("click", () => gate());
+  $("#sweep").addEventListener("click", async () => {
+    $("#sweep").disabled = true; $("#sweep-note").textContent = "Looking for quiet leads";
+    try {
+      const { drafted } = await api("/admin/sweep", {});
+      $("#sweep-note").textContent = drafted.length ? `Drafted ${drafted.length} follow-${drafted.length === 1 ? "up" : "ups"} for you to approve.` : "No leads have been quiet for a day or more.";
+      await refresh();
+    } catch { $("#sweep-note").textContent = "Couldn't look for quiet leads. Try again."; }
+    $("#sweep").disabled = false;
   });
-  $("#refresh").addEventListener("click", refresh);
-  $("#logout").addEventListener("click", () => { token = ""; store.del("pc_admin_token"); showGate(); });
   $("#followups").addEventListener("click", async (e) => {
-    const b = e.target.closest("[data-fu]");
+    const b = e.target.closest("[data-id]");
     if (!b) return;
     b.disabled = true;
-    try { await api(`/admin/followups/${b.dataset.fu}`, { method: "POST", body: JSON.stringify({ status: b.dataset.status }) }); }
-    finally { refresh(); }
+    try { await api(`/admin/followups/${b.dataset.id}`, { status: b.dataset.status }); $("#sweep-note").textContent = b.dataset.status === "approved" ? "Approved." : "Rejected."; $("#todo-title").focus?.(); await refresh(); }
+    catch { b.disabled = false; $("#sweep-note").textContent = "That didn't save. Try again."; }
   });
-
-  function start() {
-    clearInterval(timer);
-    refresh();
-    timer = setInterval(() => { refresh(); }, 10000);
-  }
-  setInterval(tick, 1000);
-  token ? start() : showGate();
+  token ? start() : gate();
 })();

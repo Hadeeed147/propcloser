@@ -23,12 +23,13 @@
 - [x] Neon Postgres support (checkpointer + Store + tables auto-created and seeded) with in-memory fallback for dev
 - [x] 30 Islamabad listings (`backend/seed/listings.csv`), schema
 - [x] Website: customer page with listings + chat, admin dashboard (pipeline, visits, follow-up approvals)
-- [x] 199 tests (no API key needed) + 4 on real Postgres in CI; image built and booted in CI, `tests.json` (10 cases) + `attacks.json` (5 attacks), benchmark runner
+- [x] Verified on the real model: benchmark 15/15, walk-through defects fixed (see git log)
+- [x] 219 tests (no API key needed) + 4 on real Postgres in CI; image built and booted in CI, `tests.json` (10 cases) + `attacks.json` (5 attacks), benchmark runner
 - [x] Dockerfile for HF Spaces, `render.yaml`, CI + keep-alive workflows, README, `docs/DEPLOY.md`
 
 **Left to do today:**
 - [x] **A:** agent core hardened (see `docs/HANDOFF.md`)
-- [ ] **B:** put the group key in `backend/.env`, run `python check_model.py`, then `python run_local.py` and chat through the demo flow
+- [ ] **B:** put the group key in `backend/.env`, run `python check_model.py` (passes on Person A's machine)
 - [ ] **B:** Neon project → HF Space (secrets) → `git subtree push --prefix backend space main` (see `docs/DEPLOY.md`)
 - [ ] **A:** run `python tests/run_bench.py --url <local or live URL>`, tune `app/prompts.py` until the 10 + 5 pass
 - [ ] Website: set `frontend/config.js` to the Space URL, deploy `frontend/` on Vercel, check `/admin`
@@ -227,13 +228,13 @@ can list other users' data.
 ## 8. Website (Vercel, static HTML/CSS/JS — no build step)
 
 **Customer page `/`**
-- Hero: "Find your next home in Islamabad — get answers in seconds"
-- Listings grid with filters (area, type, beds, price) from `GET /listings`
+- "Which sector is home?" with an ask box that starts the chat, and a sector map that filters the homes
+- Homes with filters (area, type, beds, budget) from `GET /listings`
 - Chat widget: `user_id` = random UUID kept in `localStorage`; "New chat" button makes a new `thread_id`
 - Shows tool activity chips ("Searched listings", "Checked slots") from `tool_calls`
 
 **Admin dashboard `/admin`**
-- Stat cards: new leads, qualified, visits booked, follow-ups waiting
+- "Waiting for you" first: follow-ups to approve, and "Find quiet leads" (the sweep); assistant costs at the end
 - Leads pipeline table (status badges, budget, area, timeline)
 - Visits list (pending / confirmed)
 - Follow-up queue with **Approve / Reject** buttons (this is our human-in-the-loop for sending)

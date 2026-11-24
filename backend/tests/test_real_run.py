@@ -126,3 +126,11 @@ def test_several_leads_can_view_at_the_same_time(make_graph, repo):
         chat(graph, f"cap{i}", "t", "book it")
         chat(graph, f"cap{i}", "t", "yes")
     assert sum(v["status"] == "confirmed" for v in repo.visits) == 4       # config.SLOT_CAPACITY
+
+
+def test_my_visits_hides_cancelled_ones(make_graph, repo):
+    graph, model = booked(make_graph, "mv", call("cancel_visit"), call("my_visits"), say("None."))
+    chat(graph, "mv", "t", "cancel it")
+    chat(graph, "mv", "t", "yes")
+    chat(graph, "mv", "t", "what visits do I have?")
+    assert model.seen[-1][-2].text == "This lead has no upcoming visits."

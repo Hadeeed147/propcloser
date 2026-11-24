@@ -28,8 +28,8 @@ with `{"status": "approved"|"rejected"}`, and new: `POST /admin/sweep?idle_hours
 
 **API + deploy**
 1. Put the group key in `backend/.env`, then `cd backend` and run `python check_model.py`. Two real calls (under
-   $0.001); raw errors are shown and the prompt cache is proven. Do this first: the agent has been tested against a strict local stand-in for Claude,
-   **not yet against the real model**.
+   $0.001); raw errors are shown and the prompt cache is proven. It passes on the real model on one machine already;
+   run it to prove your copy of the key.
 2. Create Neon, set `DATABASE_URL`, run `python run_local.py`, chat once, restart it, and check it still remembers you.
    CI runs the same checks on a real Postgres 17; Neon itself is only proven by this step.
 3. Deploy (`docs/DEPLOY.md`), check `/ready`, then `python tests/run_bench.py --url <live url>` and paste the table into `README.md`.
