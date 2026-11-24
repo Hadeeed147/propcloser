@@ -1,4 +1,4 @@
-# Deploy PropCloser (free tier, ~30 minutes)
+# Deploy Dastak (free tier, ~30 minutes)
 
 Order matters: **database → API → website → keep-alive**. Never put keys in code; use each platform's secrets.
 
@@ -16,7 +16,7 @@ Order matters: **database → API → website → keep-alive**. Never put keys i
 
 ## 2. Agent API on Hugging Face Spaces (Docker)
 
-1. huggingface.co → **New Space** → name `propcloser-api` → SDK **Docker** → *Blank* → **Public** → Create.
+1. huggingface.co → **New Space** → name `dastak-api` → SDK **Docker** → *Blank* → **Public** → Create.
 2. Space **Settings → Variables and secrets** → add **secrets**:
    - `ANTHROPIC_API_KEY` — your group key
    - `DATABASE_URL` — the Neon direct URL
@@ -24,7 +24,7 @@ Order matters: **database → API → website → keep-alive**. Never put keys i
 3. Push the `backend/` folder to the Space (from the repo root):
 
    ```bash
-   git remote add space https://huggingface.co/spaces/<hf-username>/propcloser-api
+   git remote add space https://huggingface.co/spaces/<hf-username>/dastak-api
    git subtree push --prefix backend space main
    ```
    When asked for a password, use a Hugging Face **access token** with write permission
@@ -34,7 +34,7 @@ Order matters: **database → API → website → keep-alive**. Never put keys i
 5. Smoke test:
 
    ```bash
-   curl -X POST https://<hf-username>-propcloser-api.hf.space/chat \
+   curl -X POST https://<hf-username>-dastak-api.hf.space/chat \
      -H "Content-Type: application/json" \
      -d '{"user_id":"demo","thread_id":"1","message":"3 bed house in Bahria Town under 3 crore"}'
    ```
@@ -46,7 +46,7 @@ Render's free tier sleeps after ~15 minutes, so turn on the keep-alive below.
 
 ## 3. Website on Vercel
 
-1. Edit `frontend/config.js` → set `window.PROPCLOSER_API` to your Space URL. Commit and push.
+1. Edit `frontend/config.js` → set `window.DASTAK_API` to your Space URL. Commit and push.
 2. vercel.com → **Add New → Project** → import this GitHub repo.
 3. **Root Directory:** `frontend` · **Framework preset:** Other · no build command → **Deploy**.
 4. Open the site, try the chat, then open `/admin` and sign in with your `ADMIN_TOKEN`.
@@ -63,7 +63,7 @@ Run it once by hand from the **Actions** tab to check it works.
 
 ```bash
 cd backend
-python tests/run_bench.py --url https://<hf-username>-propcloser-api.hf.space
+python tests/run_bench.py --url https://<hf-username>-dastak-api.hf.space
 ```
 Paste the table from `benchmark_results.md` into the README's **Benchmark** section.
 

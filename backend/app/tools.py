@@ -25,7 +25,7 @@ from app.privacy import redact
 from app.repo import PKT, format_pkr, get_repo, listing_line, memory_items, now_pkt, search, slot_label, upcoming_slots
 from app.when import parse_when
 
-log = logging.getLogger("propcloser")
+log = logging.getLogger("dastak")
 PROFILE_KEY = "profile"
 RISKY_TOOLS = {"confirm_visit", "cancel_visit", "forget_me"}      # must pass the approval_gate node
 MAX_NOTES = 8

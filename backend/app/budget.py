@@ -11,7 +11,7 @@ from collections import deque
 
 from app import config
 
-log = logging.getLogger("propcloser")
+log = logging.getLogger("dastak")
 
 # claude-haiku-5-5, prompts up to 100K tokens, USD per million tokens
 PRICE_INPUT, PRICE_OUTPUT, PRICE_CACHE_READ, PRICE_CACHE_WRITE = 0.10, 0.50, 0.01, 0.125

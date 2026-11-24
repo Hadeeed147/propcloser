@@ -34,8 +34,8 @@ jobs:
     runs-on: ubuntu-latest           # build the exact image we deploy, boot it, call it
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t propcloser backend
-      - run: docker run -d --name api -p 7860:7860 -e ANTHROPIC_API_KEY=not-a-key propcloser
+      - run: docker build -t dastak backend
+      - run: docker run -d --name api -p 7860:7860 -e ANTHROPIC_API_KEY=not-a-key dastak
       - run: |
           for i in $(seq 1 30); do curl -fsS http://localhost:7860/health && break || sleep 1; done
           test "$(curl -fsS http://localhost:7860/health)" = "ok"

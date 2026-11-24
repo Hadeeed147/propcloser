@@ -1,10 +1,10 @@
-// PropCloser customer page: homes, the map, what we remember for the visitor, and the chat with the assistant.
+// Dastak customer page: homes, the map, what we remember for the visitor, and the chat with the assistant.
 (() => {
   const store = {
     get(k, area = localStorage) { try { return area.getItem(k); } catch { return null; } },
     set(k, v, area = localStorage) { try { area.setItem(k, v); } catch { /* storage blocked: still works for this visit */ } },
   };
-  const API = (store.get("pc_api") || window.PROPCLOSER_API || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const API = (store.get("pc_api") || window.DASTAK_API || "http://127.0.0.1:8000").replace(/\/$/, "");
   const newId = (p) => `${p}-${crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)}`;
 
   // One user_id per browser (long-term memory), one thread_id per conversation (short-term memory).
@@ -86,7 +86,7 @@
       draw();
     } catch (error) {
       if (mine !== request) return;
-      console.error("PropCloser API", API, error);
+      console.error("Dastak API", API, error);
       $("#result-note").textContent = "";
       $("#grid").innerHTML = '<div class="message"><p>Homes couldn\'t load. Check your connection, then try again.</p><button class="btn btn-quiet" type="button" data-retry>Try again</button></div>';
     }
@@ -292,7 +292,7 @@
       suggest(data.reply);
       if (!savedOnly && shown.length) draw();                // refresh "Fits your search"
     } catch (error) {
-      console.error("PropCloser API", API, error);
+      console.error("Dastak API", API, error);
       typing.remove();
       const n = addBubble("error", "That didn't send. Check your connection, then try again.", [], false);
       const again = document.createElement("button");

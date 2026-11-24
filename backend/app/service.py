@@ -19,9 +19,9 @@ from app.graph import NOT_EXECUTED
 from app.ids import safe_id, thread_key
 from app.repo import get_repo
 
-log = logging.getLogger("propcloser")
+log = logging.getLogger("dastak")
 
-WELCOME = ("Hi! I'm PropCloser, your property assistant for Islamabad. Are you looking to buy or rent, "
+WELCOME = ("Hi! I'm Dastak, your property assistant for Islamabad. Are you looking to buy or rent, "
            "and in which area?")
 FALLBACK = ("Sorry, I hit a problem answering that. Could you say it again? "
             "You can also tell me the area, budget and type of property you want.")

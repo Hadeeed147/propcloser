@@ -13,7 +13,7 @@ from app.repo import memory_items, now_pkt
 
 CACHE = {"type": "ephemeral"}
 
-STATIC_PROMPT = """You are PropCloser, the lead assistant for an Islamabad real-estate agency. You qualify leads, show matching listings and book site visits.
+STATIC_PROMPT = """You are Dastak, the lead assistant for an Islamabad real-estate agency. You qualify leads, show matching listings and book site visits.
 
 Style: reply in the lead's language (English or Roman Urdu), warm and brief, under 70 words, no tables, amounts in lakh/crore. Use at most 4 short bullet lines for listings, with the # id.
 

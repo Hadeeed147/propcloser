@@ -1,4 +1,4 @@
-# PropCloser agent API — Hugging Face Spaces (Docker) or Render.
+# Dastak agent API — Hugging Face Spaces (Docker) or Render.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PORT=7860

@@ -1,4 +1,4 @@
-# PropCloser — Team Plan (single source of truth)
+# Dastak — Team Plan (single source of truth)
 
 > **Track 3: DealCloser.** An AI lead closer for real-estate agencies in Islamabad/Rawalpindi.
 > It replies to buyer leads instantly, qualifies them, matches listings, books site visits
@@ -244,7 +244,7 @@ can list other users' data.
 ## 9. Folder structure
 
 ```
-propcloser/
+dastak/
   PLAN.md                 ← this file
   README.md               ← submission README (diagrams, setup, GIF, benchmark, memory note)
   tests.json              ← our 10 test cases      attacks.json ← the 5 attack cases

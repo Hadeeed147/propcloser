@@ -1,4 +1,4 @@
-r"""The PropCloser LangGraph.
+r"""The Dastak LangGraph.
 
 START -> guard -(blocked)-> refuse -> END
               \-> load_profile -(exact "yes" to a waiting action)-> confirm_fast -> tools
@@ -35,7 +35,7 @@ from app.replies import reply_for
 from app.repo import get_repo, lead_status
 from app.tools import RISKY_TOOLS, TOOL_SPECS, TOOLS, full_memory, pick_visit, tool_error, visit_label
 
-log = logging.getLogger("propcloser")
+log = logging.getLogger("dastak")
 NOT_EXECUTED = "Not executed"
 EMPTY_REPLY = ("I can help you buy or rent property in Islamabad. "
                "Could you tell me the area, your budget and what kind of place you want?")

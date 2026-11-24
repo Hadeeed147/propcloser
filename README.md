@@ -1,8 +1,8 @@
-# PropCloser: AI lead closer for Islamabad real estate
+# Dastak: AI lead closer for Islamabad real estate
 
 **Track 3 · DealCloser** — AI-4016 Agentic AI, *Design to Production* hackathon (FAST NUCES Islamabad).
 
-Property agencies lose buyers because nobody replies for hours. PropCloser answers every lead in
+Property agencies lose buyers because nobody replies for hours. Dastak answers every lead in
 seconds, qualifies them (buy/rent, area, budget, beds, timeline), shows matching listings, estimates
 installments and books site visits — **only after the lead confirms** — and remembers each lead
 across conversations. The agency watches its pipeline and approves follow-ups on a dashboard.
@@ -14,8 +14,9 @@ across conversations. The agency watches its pipeline and approves follow-ups on
 | Demo video (2–3 min) | https://drive.google.com/file/d/1lsMzgFMPxJCB8Jq7ajnZYVBtL80RASUa/view?usp=sharing |
 | Paper canvas photo | https://drive.google.com/file/d/1nxuIDb4oqABs-baoEcRxuDxyBj3oEOPP/view?usp=sharing |
 
-![Demo](docs/demo.gif)
-<!-- TODO: record the demo flow as a GIF and save it as docs/demo.gif -->
+![Demo: a lead finds a home in Roman Urdu, books a visit after saying yes, comes back to their saved search, and the agency sees it](docs/demo.gif)
+
+Dastak was called PropCloser while we built it, so the live addresses and the video still use that name.
 
 ---
 

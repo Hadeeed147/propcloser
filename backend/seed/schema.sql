@@ -1,4 +1,4 @@
--- PropCloser tables. Safe to run repeatedly (the API runs it on every startup).
+-- Dastak tables. Safe to run repeatedly (the API runs it on every startup).
 -- LangGraph creates its own checkpoint/store tables via .setup().
 
 create table if not exists listings (

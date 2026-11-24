@@ -1,4 +1,4 @@
-// PropCloser agency desk. Five views, one at a time: today, approvals (a person decides what is sent), leads, visits, costs.
+// Dastak agency desk. Five views, one at a time: today, approvals (a person decides what is sent), leads, visits, costs.
 (() => {
   const store = {
     get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
@@ -7,7 +7,7 @@
   };
   let override = null;
   try { override = localStorage.getItem("pc_api"); localStorage.removeItem("pc_admin_token"); } catch { /* ignore */ }
-  const API = (override || window.PROPCLOSER_API || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const API = (override || window.DASTAK_API || "http://127.0.0.1:8000").replace(/\/$/, "");
   const $ = (s) => document.querySelector(s), $$ = (s) => [...document.querySelectorAll(s)];
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const icon = (name) => `<svg class="i" aria-hidden="true"><use href="icons.svg#${name}"/></svg>`;
@@ -153,7 +153,7 @@
     $$("[data-panel]").forEach((p) => { p.hidden = p.dataset.panel !== view; });
     $$("[data-view]").forEach((a) => (a.dataset.view === view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
     render(true);
-    document.title = `${VIEWS[view].title}, PropCloser agency desk`;
+    document.title = `${VIEWS[view].title}, Dastak agency desk`;
     if (move) { scrollTo({ top: 0, behavior: "instant" }); $("#view-title").focus({ preventScroll: true }); }
   }
   function render(force = false) {
@@ -178,7 +178,7 @@
     } catch (e) {
       if (e.status === 401) gate("That password isn't right. Try again.");
       else if (e.status === 503) gate("The server has no agency password yet. Set ADMIN_TOKEN (12 or more characters) and restart it.");
-      else { console.error("PropCloser API", API, e); if (!loaded) gate("The server can't be reached. Check your connection, then try again."); else $("#updated").textContent = "Can't update right now. Retrying."; }
+      else { console.error("Dastak API", API, e); if (!loaded) gate("The server can't be reached. Check your connection, then try again."); else $("#updated").textContent = "Can't update right now. Retrying."; }
     }
   }
   function start() { clearInterval(timer); refresh(); timer = setInterval(() => { if (!document.hidden) refresh(); }, 10000); }

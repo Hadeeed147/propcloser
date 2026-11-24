@@ -1,4 +1,4 @@
-"""PropCloser agent API (FastAPI).
+"""Dastak agent API (FastAPI).
 
 Graded endpoints (open, no login):
     POST /chat    {"user_id", "thread_id", "message"} -> {"reply", "tool_calls", "tokens": {"in", "out"}}
@@ -28,7 +28,7 @@ from app.repo import MemoryRepo, PostgresRepo, get_repo, search, set_repo
 from app.service import run_chat
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-log = logging.getLogger("propcloser")
+log = logging.getLogger("dastak")
 
 
 @asynccontextmanager
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     await repo.close()
 
 
-app = FastAPI(title="PropCloser API", version="1.0", lifespan=lifespan)
+app = FastAPI(title="Dastak API", version="1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=config.ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -129,7 +129,7 @@ async def crashed(request: Request, exc: Exception):
 
 @app.get("/")
 async def root():
-    return {"name": "PropCloser API", "track": "DealCloser", "docs": "/docs", "health": "/health",
+    return {"name": "Dastak API", "track": "DealCloser", "docs": "/docs", "health": "/health",
             "storage": get_repo().kind}
 
 

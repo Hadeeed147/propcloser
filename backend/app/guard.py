@@ -43,11 +43,11 @@ OFF_TOPIC = re.compile(
 )
 
 REFUSALS = {
-    "injection": ("I can't do that. I'm PropCloser, this agency's property assistant, and I only help with "
+    "injection": ("I can't do that. I'm Dastak, this agency's property assistant, and I only help with "
                   "buying or renting property in Islamabad. What kind of home are you looking for?"),
     "exfiltration": ("I can't share anything about other clients or our systems — every client's details are "
                      "private. I'm happy to help with your own property search, though. What are you looking for?"),
-    "off_topic": ("That's outside what I can help with — I'm PropCloser, and I only help with buying or renting "
+    "off_topic": ("That's outside what I can help with — I'm Dastak, and I only help with buying or renting "
                   "property in Islamabad (listings, prices, installments and site visits). What are you looking for?"),
     "too_long": "That message is too long for me. Could you tell me in a few lines what property you're looking for?",
 }

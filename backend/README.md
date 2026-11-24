@@ -1,5 +1,5 @@
 ---
-title: PropCloser API
+title: Dastak API
 emoji: 🏠
 colorFrom: green
 colorTo: yellow
@@ -8,9 +8,9 @@ app_port: 7860
 pinned: false
 ---
 
-# PropCloser agent API
+# Dastak agent API
 
-FastAPI + LangGraph backend for PropCloser (Track 3: DealCloser). The header above is the
+FastAPI + LangGraph backend for Dastak (Track 3: DealCloser). The header above is the
 Hugging Face Spaces config: this folder is pushed as-is to the Space.
 
 - `POST /chat` — `{"user_id", "thread_id", "message"}` → `{"reply", "tool_calls", "tokens": {"in", "out"}}`
