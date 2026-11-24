@@ -64,5 +64,5 @@ python tests/run_bench.py --url https://<hf-username>-propcloser-api.hf.space
 ```
 Paste the table from `benchmark_results.md` into the README's **Benchmark** section.
 
-Cost check: each `/chat` call is usually one Haiku call (two or three when tools run), capped at 400
+Cost check: each `/chat` call is usually one Haiku call (two or three when tools run), capped at 700
 output tokens; guard refusals cost 0 tokens. Watch usage in the Anthropic console — the key stops at $2.

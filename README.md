@@ -47,37 +47,52 @@ flowchart TD
     guard -->|blocked| refuse[refuse<br/>canned reply]
     refuse --> END([END])
     guard -->|ok| load[load_profile<br/>Store by user_id]
-    load --> closer[closer<br/>Haiku + tools]
-    closer -->|only safe calls| tools[tools<br/>ToolNode]
-    tools --> closer
-    closer -->|risky call| gate[approval_gate<br/>pending + later yes?]
+    load -->|exact yes to what we just asked| fast[confirm_fast<br/>writes the approved call]
+    fast --> tools[tools<br/>ToolNode]
+    load --> closer[closer<br/>Haiku 5.5 + 13 tools]
+    closer -->|only safe calls| tools
+    tools --> load
+    closer -->|risky call| gate[approval_gate<br/>earlier question + yes?]
     gate -->|yes| tools
-    gate -->|not yet| pipe
-    closer -->|no tool calls| pipe[update_pipeline<br/>lead status]
+    gate -->|not yet: asks| pipe[update_pipeline<br/>lead status]
+    closer -->|no tool calls| pipe
     pipe --> END
 ```
 
 | Node | LLM? | Role |
 |---|---|---|
-| `guard` | No | Blocks prompt injection, data exfiltration, obvious off-topic and over-long messages (regex rules). |
+| `guard` | No | Blocks prompt injection, data exfiltration, obvious off-topic and over-long messages. |
 | `refuse` | No | Fixed polite refusal that steers back to property. **0 tokens.** |
-| `load_profile` | No | Reads the lead's long-term profile from the Store (`("leads", user_id)`). |
-| `closer` | **Yes** | The sales agent: Claude Haiku with 9 tools. The only node that calls the model. |
+| `load_profile` | No | Reads the lead's long-term memory and booked visits. Runs again after every tool step, so it is never stale. |
+| `closer` | **Yes** | The sales agent. The only node that calls the model. |
 | `tools` | No | LangGraph `ToolNode`; tools take `user_id` from the run context, never from the model. |
-| `approval_gate` | No | Human-in-the-loop: `confirm_visit` runs only if a visit is pending **and** the lead says yes in a later message. Never uses `interrupt()`, so the automated grader can't deadlock. |
+| `approval_gate` | No | Human-in-the-loop for `confirm_visit`, `cancel_visit` and `forget_me`: runs only after a yes in a **later** message. No `interrupt()`, so an API client can never get stuck. |
+| `confirm_fast` | No | If the lead answers our question with an exact "yes" / "haan ji", it writes the approved tool call itself: one model call instead of two, and the model cannot forget to act. |
 | `update_pipeline` | No | Moves the lead new → qualified → visit booked for the dashboard. |
+
+### What makes it different
+
+- **Understands local money.** "dedh crore", "paune do crore", "80 lac" and "2 crore 50 lakh" are parsed in code
+  (`app/money.py`), so no zeros get lost. An unclear amount ("2", "1 to 2 crore") is asked about, never guessed.
+- **Follows up for days at zero token cost.** `POST /admin/sweep` finds leads who went quiet and drafts a personal
+  message from their memory plus a real matching listing, at most 3 times (1, 3 and 7 days). A human approves each one.
+- **Fails loudly.** A failed model call is logged with its cause and counted as a fail by our benchmark.
 
 ### Tools
 
 | Tool | What it does | Risk |
 |---|---|---|
-| `search_listings` | Filters 30 Islamabad listings by purpose, area, type, beds, budget; returns the closest options if nothing matches | safe |
+| `search_listings` | Filters the 30 listings by purpose, area, type, beds, budget; closest options if nothing matches | safe |
 | `get_listing` | Full details of one listing | safe |
 | `check_slots` | Free visit slots for the next 7 days | safe |
 | `calculate_installment` | Monthly installment (amortisation formula) | safe |
-| `save_lead_profile` | Writes budget/area/beds/timeline… to long-term memory + CRM | safe |
-| `request_visit` | Holds a slot as **pending** | safe |
-| `confirm_visit` | Books the pending visit | **risky → approval_gate** |
+| `save_lead_profile` | Saves budget, area, beds, timeline… and free-text notes; phone, CNIC, card and email are removed first | safe |
+| `my_data` | Shows the lead what is remembered about them | safe |
+| `forget_me` | Deletes the lead's saved memory | **approval** |
+| `request_visit` | Holds a slot (not booked yet) | safe |
+| `reschedule_visit` | Holds a new slot; the old visit is kept until the lead says yes | safe |
+| `confirm_visit` | Books the held slot | **approval** |
+| `cancel_visit` | Cancels one of the lead's own visits | **approval** |
 | `my_visits` | The lead's own visits | safe |
 | `schedule_followup` | Queues a follow-up for the agency to approve — never sends | safe (human approves) |
 
@@ -85,11 +100,11 @@ flowchart TD
 
 | | Short-term | Long-term |
 |---|---|---|
-| **What** | The messages of this chat, the visit being held (`pending_action`) | Lead profile: name, budget, area, buy/rent, type, beds, timeline, financing, booked visits |
+| **What** | The messages of this chat, the visit being held (`pending_action`) | Lead profile: name, budget, area, buy/rent, type, beds, timeline, financing, notes (e.g. "needs parking"), booked visits |
 | **Keyed by** | `thread_id` — stored as `user_id:thread_id` | `user_id` — Store namespace `("leads", user_id)` |
 | **Where** | LangGraph `AsyncPostgresSaver` on Neon | LangGraph `AsyncPostgresStore` on Neon (+ `leads` table for the dashboard) |
-| **Trimming** | Only the last ~16 messages go to the model, always cut at a user message so tool calls are never split; the profile is injected, so nothing important is lost | — |
-| **Not saved** | — | Phone numbers, CNIC, payment details, raw chat logs, anything about other people |
+| **Trimming** | Only the last ~40 messages go to the model, always cut at a user message so tool calls are never split; the profile is injected, so nothing important is lost | — |
+| **Not saved** | — | Phone numbers, CNIC, cards, emails (redacted in code), raw chat logs, anything about other people |
 
 **How users are kept separate:** `user_id` comes only from the request body and is passed as LangGraph
 *context* — the model never sees or chooses it. Every tool and SQL query filters by it, the checkpoint
@@ -103,9 +118,9 @@ another lead's data. Admin endpoints need the `X-Admin-Token` header.
 | Prompt injection / system-prompt extraction / role-play jailbreaks | `guard` node → `refuse` (0 tokens); the prompt also treats tool output as data |
 | Asking for other clients' data | `guard` rules + no tool can access other users |
 | Off-topic requests | `guard` rules for obvious cases; the closer prompt refuses the rest in one sentence |
-| Booking without consent | `request_visit` only holds a slot; `approval_gate` needs a later "yes" |
+| Booking, cancelling or deleting without consent | `approval_gate` needs a "yes" in a later message |
 | Messaging leads | `schedule_followup` only queues; the agency approves on the dashboard |
-| Cost / runaway loops | `max_tokens=400`, trimmed history, recursion limit 25, 45 s timeout, refusals skip the model |
+| Cost / runaway loops | `max_tokens=700`, thinking off, cached system prompt, trimmed history, recursion limit 25, 45 s timeout, refusals skip the model |
 | Errors | `/chat` never returns 500; broken threads are repaired so the next turn still works |
 
 ## Benchmark
@@ -124,8 +139,8 @@ cd backend && python tests/run_bench.py --url https://<hf-username>-propcloser-a
 | A1–A5 | injection, prompt extraction, cross-user data, risky action, jailbreak | _…_ |
 
 Unit tests (`backend/tests`, no API key needed — a scripted model drives the real graph):
-guard rules, the `/chat` contract and token counting, the two-turn booking approval, long-term memory
-across threads, and isolation between users who share a `thread_id`.
+the exact request sent to Claude, guard rules, the `/chat` contract, parallel tool calls, approvals, cancel and
+reschedule, memory and redaction, money parsing, the lead sweep, and isolation between users.
 
 ## API
 
@@ -137,7 +152,8 @@ POST /chat
 GET /health → ok
 ```
 `tokens` sums every model call in the turn; `tool_calls` lists the tools that actually ran.
-Website-only endpoints: `GET /listings`, `GET /admin/stats|leads|visits|followups`, `POST /admin/followups/{id}`.
+Website-only endpoints: `GET /listings`, `GET /admin/stats|leads|visits|followups`, `POST /admin/followups/{id}`,
+`POST /admin/sweep`.
 
 ## Run it locally
 
@@ -146,6 +162,7 @@ python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\a
 pip install -r backend/requirements.txt
 cp .env.example backend/.env                          # add ANTHROPIC_API_KEY (DATABASE_URL optional locally)
 cd backend
+python check_model.py                                  # one real Claude call, shows raw errors
 python run_local.py                                    # API on http://127.0.0.1:8000  (docs at /docs)
 pytest -q                                              # unit tests, no key needed
 ```
@@ -161,8 +178,10 @@ Deploying: see **[docs/DEPLOY.md](docs/DEPLOY.md)** (Neon → Hugging Face Space
 backend/
   app/main.py        FastAPI: /chat, /health, /listings, /admin/*
   app/graph.py       LangGraph: nodes, routing, approval gate
-  app/tools.py       the 9 tools
-  app/guard.py       safety rules
+  app/tools.py       the 13 tools
+  app/guard.py       safety rules                 app/approval.py   what counts as a yes
+  app/money.py       local money words            app/privacy.py    redaction
+  app/followups.py   quiet-lead sweep
   app/prompts.py     system prompt
   app/repo.py        Neon Postgres + in-memory data access
   app/service.py     one /chat turn: thread key, tokens, tool_calls, error repair
@@ -180,8 +199,8 @@ PLAN.md              team plan and decisions      docs/DEPLOY.md step-by-step de
 |---|---|
 | Customer page + admin dashboard | `frontend/index.html`, `frontend/admin.html` |
 | FastAPI backend | `backend/app/main.py` |
-| LangGraph, 2+ nodes with distinct roles | `backend/app/graph.py` (7 nodes) |
-| 2+ real tools | `backend/app/tools.py` (9 tools on Postgres) |
+| LangGraph, 2+ nodes with distinct roles | `backend/app/graph.py` (8 nodes) |
+| 2+ real tools | `backend/app/tools.py` (13 tools on Postgres) |
 | Short-term memory by `thread_id` | `AsyncPostgresSaver`, `service.thread_key` |
 | Long-term memory by `user_id` | `AsyncPostgresStore` `("leads", user_id)` |
 | Multiple users isolated | context `user_id`, filtered queries, `user_id:thread_id` keys, tests |

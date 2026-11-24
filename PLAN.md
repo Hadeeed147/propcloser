@@ -19,15 +19,16 @@
 ## 0. Status (update as you go)
 
 **Done (scaffold, tested locally):**
-- [x] Backend: FastAPI `/chat` + `/health`, LangGraph graph (7 nodes), 9 tools, guard, approval gate, error repair
+- [x] Backend: FastAPI `/chat` + `/health`, LangGraph graph (8 nodes), 13 tools, guard, approval gate, error repair
 - [x] Neon Postgres support (checkpointer + Store + tables auto-created and seeded) with in-memory fallback for dev
 - [x] 30 Islamabad listings (`backend/seed/listings.csv`), schema
 - [x] Website: customer page with listings + chat, admin dashboard (pipeline, visits, follow-up approvals)
-- [x] 32 unit tests (no API key needed), `tests.json` (10 cases) + `attacks.json` (5 attacks), benchmark runner
+- [x] 132 unit tests (no API key needed), `tests.json` (10 cases) + `attacks.json` (5 attacks), benchmark runner
 - [x] Dockerfile for HF Spaces, `render.yaml`, CI + keep-alive workflows, README, `docs/DEPLOY.md`
 
 **Left to do today:**
-- [ ] **B:** put the group key in `backend/.env`, run `python run_local.py`, chat through the demo flow
+- [x] **A:** agent core hardened (see `docs/HANDOFF.md`)
+- [ ] **B:** put the group key in `backend/.env`, run `python check_model.py`, then `python run_local.py` and chat through the demo flow
 - [ ] **B:** Neon project → HF Space (secrets) → `git subtree push --prefix backend space main` (see `docs/DEPLOY.md`)
 - [ ] **A:** run `python tests/run_bench.py --url <local or live URL>`, tune `app/prompts.py` until the 10 + 5 pass
 - [ ] Website: set `frontend/config.js` to the Space URL, deploy `frontend/` on Vercel, check `/admin`
@@ -83,154 +84,29 @@ flowchart TD
     guard -->|blocked| refuse[refuse<br/>canned reply]
     refuse --> END([END])
     guard -->|ok| load[load_profile<br/>Store by user_id]
-    load --> closer[closer<br/>Haiku + tools]
-    closer -->|only safe calls| tools[tools<br/>ToolNode]
-    tools --> closer
-    closer -->|any risky call| gate[approval_gate<br/>pending + said yes?]
+    load -->|exact yes to what we just asked| fast[confirm_fast<br/>writes the approved call]
+    fast --> tools[tools<br/>ToolNode]
+    load --> closer[closer<br/>Haiku 5.5 + 13 tools]
+    closer -->|only safe calls| tools
+    tools --> load
+    closer -->|risky call| gate[approval_gate<br/>earlier question + yes?]
     gate -->|yes| tools
-    gate -->|not yet: ToolMessages + question| pipe
-    closer -->|no tool calls| pipe[update_pipeline<br/>lead status, no LLM]
+    gate -->|not yet: asks| pipe[update_pipeline<br/>lead status]
+    closer -->|no tool calls| pipe
     pipe --> END
 ```
 
-| Node | LLM? | Reads | Writes | Job |
-|---|---|---|---|---|
-| `guard` | No | last user message | `blocked` | Regex rules: prompt injection, data exfiltration, obvious off-topic, > 2,000 chars. Runs every turn. |
-| `refuse` | No | — | `messages` | One canned, polite refusal that steers back to property. Costs 0 tokens. |
-| `load_profile` | No | Store `("leads", user_id)` | `lead_profile` | Long-term memory read. |
-| `closer` | **Yes** | trimmed `messages`, `lead_profile`, `pending_action` | `messages` | The only LLM node. Haiku with tools bound. Qualifies, searches, requests visits, saves facts. |
-| `tools` | No | tool calls | `messages`, `pending_action` (via `Command`) | `ToolNode`. Tools get `user_id` + Store from `ToolRuntime`, never from the model. |
-| `approval_gate` | No | `pending_action`, last user message | `messages` | Human-in-the-loop for `confirm_visit`. Passes only if a visit is pending **and** the lead's latest message is a yes. Otherwise it answers every blocked call with a `ToolMessage("Not executed: waiting for the lead to confirm")` and adds the question "Shall I book … ? Reply yes to confirm." **No `interrupt()`**, so the grader can't deadlock, and no orphaned tool calls, so the next Claude call won't fail. |
-| `update_pipeline` | No | `lead_profile`, visits table | `leads.status` | Moves the lead new → qualified (budget + area + timeline known) → visit_booked, for the dashboard. |
-
-**"2+ agents/nodes with distinct roles":** guard (safety), closer (LLM agent), approval_gate
-(human approval), load_profile / update_pipeline (memory + CRM). Only `closer` calls the model,
-so most turns cost exactly one Haiku call (two or three when tools run).
+Node and tool tables: `README.md`. Code: `backend/app/graph.py`. Task plan: `docs/superpowers/plans/2026-11-24-agent-core.md`.
+Contract for everyone else: `docs/HANDOFF.md`.
 
 ### 2.2 How a booking works (two turns, same thread)
 
 | Turn | Lead says | Path | Result |
 |---|---|---|---|
-| 1 | "Show me the DHA house on Saturday 3pm" | guard → load → closer → tools (`check_slots`, `request_visit`) → closer → pipeline | Visit saved as **pending**; `pending_action = {"visit_id": 12, "summary": "DHA Phase 2 house, Sat 3:00 PM"}`; reply asks "Shall I confirm?" |
-| 2 | "yes" | guard → load → closer (`confirm_visit`) → **approval_gate** ✅ → tools → closer → pipeline | Visit **confirmed**, slot booked, `pending_action` cleared, status → visit_booked |
-| 2′ | "book it" with nothing pending | closer (`confirm_visit`) → **approval_gate** ❌ | ToolMessage "Not executed" + "Which listing and time? I'll check free slots." |
-
-### 2.3 State, context and wiring
-
-> The real implementation is in `backend/app/graph.py` (graph), `tools.py`, `service.py` (the `/chat` turn).
-> It follows the sketch below with three refinements: the guard stores a `blocked_reason` (injection /
-> exfiltration / off_topic / too_long) instead of a bool; the gate requires the "yes" to come in a **later**
-> message than the one that created the hold; and if the model mixes safe + risky calls, the gate runs the
-> safe ones and holds only the risky one.
-
-Sketch:
-
-```python
-from dataclasses import dataclass
-from typing import Annotated, Literal, TypedDict
-import re
-
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, trim_messages
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
-from langgraph.runtime import Runtime
-from langgraph.types import Command
-
-@dataclass
-class Ctx:                      # per request, set by FastAPI — never by the model
-    user_id: str
-
-class State(TypedDict):         # saved by the checkpointer per thread
-    messages: Annotated[list, add_messages]
-    lead_profile: dict
-    pending_action: dict | None
-    blocked: bool
-
-RISKY = {"confirm_visit"}
-YES = re.compile(r"\b(yes|yeah|yep|confirm|ok(ay)?|sure|book it|go ahead|haan|han|ji|theek hai)\b", re.I)
-
-llm = ChatAnthropic(model="claude-haiku-5-5", max_tokens=400, timeout=25, max_retries=1).bind_tools(TOOLS)
-
-def guard(state: State) -> dict:
-    text = state["messages"][-1].text
-    return {"blocked": bool(INJECTION.search(text) or OFF_TOPIC.search(text) or len(text) > 2000)}
-
-def refuse(state: State) -> dict:
-    return {"messages": [AIMessage(REFUSAL)]}
-
-async def load_profile(state: State, runtime: Runtime[Ctx]) -> dict:
-    item = await runtime.store.aget(("leads", runtime.context.user_id), "profile")
-    return {"lead_profile": item.value if item else {}}
-
-async def closer(state: State) -> dict:
-    history = trim_messages(state["messages"], strategy="last", token_counter=len,
-                            max_tokens=16, start_on="human")      # last 16 messages, never splits a tool pair
-    system = SystemMessage(build_prompt(state["lead_profile"], state.get("pending_action")))
-    return {"messages": [await llm.ainvoke([system, *history])]}
-
-def route_after_closer(state: State) -> Literal["tools", "approval_gate", "update_pipeline"]:
-    calls = state["messages"][-1].tool_calls
-    if not calls:
-        return "update_pipeline"
-    return "approval_gate" if any(c["name"] in RISKY for c in calls) else "tools"
-
-def approval_gate(state: State) -> Command[Literal["tools", "update_pipeline"]]:
-    calls = state["messages"][-1].tool_calls
-    said = next(m.text for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
-    pending = state.get("pending_action")
-    if pending and YES.search(said):
-        return Command(goto="tools")
-    skipped = [ToolMessage("Not executed: waiting for the lead to confirm.", tool_call_id=c["id"]) for c in calls]
-    ask = (f"Just to confirm: shall I book {pending['summary']}? Reply yes to confirm." if pending
-           else "Which listing and time would you like? I'll check the free slots first.")
-    return Command(goto="update_pipeline", update={"messages": [*skipped, AIMessage(ask)]})
-
-g = StateGraph(State, context_schema=Ctx)
-for name, fn in [("guard", guard), ("refuse", refuse), ("load_profile", load_profile), ("closer", closer),
-                 ("tools", ToolNode(TOOLS)), ("approval_gate", approval_gate), ("update_pipeline", update_pipeline)]:
-    g.add_node(name, fn)
-g.add_edge(START, "guard")
-g.add_conditional_edges("guard", lambda s: "refuse" if s["blocked"] else "load_profile", ["refuse", "load_profile"])
-g.add_edge("refuse", END)
-g.add_edge("load_profile", "closer")
-g.add_conditional_edges("closer", route_after_closer, ["tools", "approval_gate", "update_pipeline"])
-g.add_edge("tools", "closer")
-g.add_edge("update_pipeline", END)
-graph = g.compile(checkpointer=checkpointer, store=store)   # AsyncPostgresSaver + AsyncPostgresStore on Neon
-```
-
-Tools that change state return a `Command` (same pattern as the instructor's `verify_identity`):
-
-```python
-@tool
-async def request_visit(listing_id: int, slot_id: int, runtime: ToolRuntime[Ctx]) -> Command:
-    """Hold a visit slot for the lead. The lead must confirm before it is booked."""
-    visit = await db.create_pending_visit(runtime.context.user_id, listing_id, slot_id)
-    return Command(update={
-        "pending_action": {"visit_id": visit.id, "summary": visit.summary},
-        "messages": [ToolMessage(f"Held {visit.summary}. Ask the lead to confirm.", tool_call_id=runtime.tool_call_id)],
-    })
-```
-
-### 2.4 Calling the graph from `/chat` (Person B)
-
-```python
-cfg = {"configurable": {"thread_id": f"{req.user_id}:{req.thread_id}"}, "recursion_limit": 20}
-before = len((await graph.aget_state(cfg)).values.get("messages", []))
-out = await graph.ainvoke({"messages": [HumanMessage(req.message)]}, cfg, context=Ctx(user_id=req.user_id))
-new = out["messages"][before:]
-ran = {m.tool_call_id for m in new if isinstance(m, ToolMessage) and not m.text.startswith("Not executed")}
-return {
-    "reply": new[-1].text,
-    "tool_calls": [{"name": c["name"], "args": c["args"]}
-                   for m in new if isinstance(m, AIMessage) for c in m.tool_calls if c["id"] in ran],
-    "tokens": {"in":  sum(m.usage_metadata["input_tokens"]  for m in new if isinstance(m, AIMessage) and m.usage_metadata),
-               "out": sum(m.usage_metadata["output_tokens"] for m in new if isinstance(m, AIMessage) and m.usage_metadata)},
-}
-```
-Wrap it in `try/except` (including `GraphRecursionError`) and return a polite reply instead of a 500.
+| 1 | "book the B-17 house Wednesday 5pm" | guard → load_profile → closer → tools (`request_visit`) → … → closer | Slot **held**, agent asks "shall I book…?" |
+| 2 | "haan ji" | guard → load_profile → **confirm_fast** → tools (`confirm_visit`) → closer | Booked, one model call |
+| 2′ | "ok show me cheaper ones" | guard → load_profile → closer | Not an exact yes: nothing is booked |
+| 2″ | later, "yes" to some other question | closer | Only the message right after our question can trigger confirm_fast |
 
 ---
 
@@ -270,6 +146,10 @@ All tools take `user_id` from the run config, **never** from model arguments.
 | `save_lead_profile` | any of `name, budget_pkr, area, purpose, property_type, beds, timeline, financing` | Merged profile (Store + `leads` table) | Safe |
 | `request_visit` | `listing_id`, `slot` (slot id, e.g. `2026-11-28T15:00`) | Creates a **pending** visit, sets `pending_action`, tells the agent to ask for confirmation | Safe |
 | `confirm_visit` | — | Books the pending visit (unique index stops double booking) | **Risky → approval gate** |
+| `reschedule_visit` | `visit_id`, `slot` | Holds the new slot; old visit kept until yes | Safe |
+| `cancel_visit` | `visit_id` | Cancels the lead's own visit | **Risky → approval gate** |
+| `my_data` | — | What is remembered about this lead | Safe |
+| `forget_me` | — | Deletes the lead's saved memory | **Risky → approval gate** |
 | `my_visits` | — | This lead's own visits | Safe |
 | `schedule_followup` | `message`, `due_in_days` | Queues a follow-up as `pending_approval`; the agency approves it on the dashboard. Never sends. | Safe (human approves later) |
 
@@ -320,7 +200,7 @@ Every query on `leads`, `visits`, `followups` has `where user_id = %s`.
 | What | Messages of this chat, the listing being discussed, `pending_action` | Lead profile: name, budget, area, purpose, type, beds, timeline, financing, status, booked visits |
 | Key | `thread_id` (stored as `user_id:thread_id`) | `user_id` → Store namespace `("leads", user_id)` |
 | Where | `PostgresSaver` on Neon | `PostgresStore` on Neon (+ `leads` table for the dashboard) |
-| Trimming | Send only the last 12 messages to the model; profile is injected so nothing important is lost | — |
+| Trimming | Send only the last ~40 messages to the model; profile is injected so nothing important is lost | — |
 | Not saved | — | CNIC, phone numbers, payment details, full chat logs, anything said about other people |
 
 **Isolation:** `user_id` comes from the request body only; tools read it from config; the
@@ -338,7 +218,7 @@ can list other users' data.
 | Off-topic (poems, homework, code, politics) | `guard` keyword rules for obvious cases; closer prompt refuses the rest in one sentence and steers back |
 | Booking without consent | `approval_gate` + pending visit until the lead says yes |
 | Sending messages | `schedule_followup` only queues; the agency approves on the dashboard |
-| Cost blow-up | `max_tokens=400`, 12-message window, ≤ 6 tool loops per turn, short system prompt, prompt caching |
+| Cost blow-up | `max_tokens=700`, thinking off, 40-message window, recursion limit 25, short system prompt, prompt caching |
 
 ---
 
@@ -369,7 +249,7 @@ propcloser/
   backend/
     app/main.py           ← FastAPI: /chat, /health, /listings, /admin/*, Neon/in-memory startup
     app/graph.py          ← nodes + routing + approval gate
-    app/tools.py          ← the 9 tools (section 4)
+    app/tools.py          ← the 13 tools (README)
     app/guard.py          ← safety regexes + refusals
     app/prompts.py        ← system prompt
     app/repo.py           ← Postgres + in-memory data access, listing search, slots
@@ -413,10 +293,10 @@ Cut order if late: follow-ups → installment calculator → dashboard polish. N
 - [ ] API and site stay live until Wednesday
 
 ### Form answers (copy into the submission form)
-- **Nodes:** guard (rules-based safety), refuse, load_profile (long-term memory read), closer (Claude Haiku agent with tools), tools, approval_gate (asks the lead before booking), update_pipeline (moves the lead's CRM status).
-- **Tools:** search_listings, get_listing, check_slots, calculate_installment, save_lead_profile, request_visit, confirm_visit, my_visits, schedule_followup.
+- **Nodes:** guard (rules-based safety), refuse, load_profile (long-term memory read), closer (Claude Haiku agent with tools), tools, approval_gate (asks the lead before booking, cancelling or deleting), confirm_fast (acts on an exact yes), update_pipeline (moves the lead's CRM status).
+- **Tools:** search_listings, get_listing, check_slots, calculate_installment, save_lead_profile, request_visit, reschedule_visit, confirm_visit, cancel_visit, my_visits, my_data, forget_me, schedule_followup.
 - **Memory:** short-term = Postgres checkpointer per `user_id:thread_id`; long-term = Postgres Store namespace `("leads", user_id)` holding budget, area, purpose, type, beds, timeline.
-- **Safety:** refuses off-topic and prompt injection in a guard node; never reveals other users' data; bookings need an explicit "yes"; follow-up messages need agency approval.
+- **Safety:** refuses off-topic and prompt injection in a guard node; never reveals other users' data; booking, cancelling and deleting need an explicit "yes" in a later message; follow-up messages need agency approval.
 - **Demo data:** ~30 Islamabad listings (DHA, Bahria Town, F-7, F-11, G-11, G-13, E-11, B-17, Gulberg), sale and rent (houses, flats, plots), PKR 45k/month rent up to 38 crore, visit slots 11 AM / 3 PM / 5 PM for the next 7 days.
 
 ---
@@ -430,7 +310,7 @@ Cut order if late: follow-ups → installment calculator → dashboard polish. N
 5. **LangGraph design:** guard (→ refuse) → load_profile → closer ⇄ tools; risky calls → approval_gate; → update_pipeline → END.
 6. **Tools:** see section 4.
 7. **Pages:** customer listings + chat; admin leads pipeline, visits, follow-up approvals.
-8. **Short-term memory:** the chat per thread_id; last 12 messages sent to the model.
+8. **Short-term memory:** the chat per thread_id; last ~40 messages sent to the model.
 9. **Long-term memory:** lead profile per user_id; never CNIC, phone, payment details or raw chats.
 10. **Multiple users:** user_id only from the request; every query filtered by it; checkpoint key includes user_id.
 11. **Biggest risk + guard:** booking or messaging without consent / prompt injection → approval gate, pending visits, agency-approved follow-ups, guard node.
