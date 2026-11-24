@@ -220,7 +220,7 @@ backend/
   seed/              listings.csv (30 Islamabad demo listings), schema.sql
   tests/             unit tests + run_bench.py
   Dockerfile         Hugging Face Spaces / Render
-frontend/            static site for Vercel: index.html + map.js (customer, sector map), admin.html (agency desk)
+frontend/            static site for Vercel: index.html + app.js, me.js (remembers on this device), realmap.js (map.js is its fallback), photos.js; admin.html (agency desk)
 tests.json           our 10 benchmark cases      attacks.json   the 5 attack cases
 PLAN.md              team plan and decisions      docs/DEPLOY.md step-by-step deployment
 ```

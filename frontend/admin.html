@@ -3,66 +3,106 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>PropCloser · Agency desk</title>
+  <title>PropCloser agency desk</title>
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#14213d">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="admin.css">
   <script src="config.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="./"><span class="sign" aria-hidden="true">PC</span>Agency desk</a>
-    <nav aria-label="Main"><a href="./">Customer site</a><button id="logout" type="button" hidden>Sign out</button></nav>
-  </header>
+  <a class="skip" href="#main">Skip to content</a>
 
-  <main class="desk">
-    <section id="gate" class="gate" aria-labelledby="gate-title" hidden>
-      <h1 id="gate-title">Sign in</h1>
-      <form id="gate-form">
-        <label for="token">Agency password</label>
-        <input id="token" type="password" autocomplete="current-password" required aria-describedby="gate-error">
-        <p class="problem" id="gate-error" role="alert"></p>
-        <button class="btn btn-primary" type="submit">Sign in</button>
-      </form>
-    </section>
+  <section id="gate" class="gate" aria-labelledby="gate-title" hidden>
+    <form id="gate-form">
+      <p class="brand"><img src="icon.svg" width="32" height="32" alt="">PropCloser</p>
+      <h1 id="gate-title">Agency desk</h1>
+      <p class="muted">Sign in to see leads, visits and drafts waiting for you.</p>
+      <label for="token">Agency password</label>
+      <input id="token" type="password" autocomplete="current-password" required aria-describedby="gate-error">
+      <p class="problem" id="gate-error" role="alert"></p>
+      <button class="btn btn-primary" type="submit">Sign in</button>
+      <a href="./">Go to the customer site</a>
+    </form>
+  </section>
 
-    <div id="board" hidden>
-      <section class="todo" aria-labelledby="todo-title">
-        <div class="section-head">
-          <h1 id="todo-title">Waiting for you</h1>
-          <button class="btn btn-quiet" type="button" id="sweep">Find quiet leads</button>
+  <div id="desk" class="desk" hidden>
+    <aside class="side">
+      <a class="brand" href="./"><img src="icon.svg" width="32" height="32" alt=""><span>PropCloser</span></a>
+      <nav class="side-nav" aria-label="Desk">
+        <a href="#today" data-view="today"><svg class="i" aria-hidden="true"><use href="icons.svg#today"/></svg><span>Today</span></a>
+        <a href="#approvals" data-view="approvals"><svg class="i" aria-hidden="true"><use href="icons.svg#inbox"/></svg><span>Approvals</span><b class="badge" id="badge" hidden></b></a>
+        <a href="#leads" data-view="leads"><svg class="i" aria-hidden="true"><use href="icons.svg#users"/></svg><span>Leads</span></a>
+        <a href="#visits" data-view="visits"><svg class="i" aria-hidden="true"><use href="icons.svg#calendar"/></svg><span>Visits</span></a>
+        <a href="#costs" data-view="costs"><svg class="i" aria-hidden="true"><use href="icons.svg#wallet"/></svg><span>Costs</span></a>
+      </nav>
+      <div class="side-foot">
+        <a href="./"><svg class="i" aria-hidden="true"><use href="icons.svg#external"/></svg><span>Customer site</span></a>
+        <button id="logout" type="button"><svg class="i" aria-hidden="true"><use href="icons.svg#logout"/></svg><span>Sign out</span></button>
+      </div>
+    </aside>
+
+    <main id="main" tabindex="-1">
+      <header class="view-head">
+        <div><h1 id="view-title" tabindex="-1">Today</h1><p id="view-note" class="muted"></p></div>
+        <div class="view-actions">
+          <p id="updated" class="fine" role="status"></p>
+          <button class="btn btn-quiet icon-only" id="refresh" type="button" aria-label="Refresh" title="Refresh"><svg class="i" aria-hidden="true"><use href="icons.svg#refresh"/></svg></button>
+          <details class="only-phone menu"><summary class="btn btn-quiet icon-only" aria-label="More"><svg class="i" aria-hidden="true"><use href="icons.svg#user"/></svg></summary>
+            <div><a href="./">Customer site</a><button type="button" id="logout-2">Sign out</button></div></details>
         </div>
-        <p class="fine">The assistant never messages anyone by itself. "Find quiet leads" drafts a follow-up for leads who stopped replying; you approve each one.</p>
-        <p id="sweep-note" class="note" role="status"></p>
-        <div id="followups" class="list"></div>
+      </header>
+
+      <section data-panel="today" hidden>
+        <div id="kpis" class="kpis"></div>
+        <div class="two">
+          <div class="box"><div class="box-head"><h2>Waiting for you</h2><a href="#approvals">All approvals</a></div><div id="today-approvals"></div></div>
+          <div class="box"><div class="box-head"><h2>Next visits</h2><a href="#visits">All visits</a></div><div id="today-visits"></div></div>
+        </div>
+        <div class="box"><div class="box-head"><h2>Lead pipeline</h2><a href="#leads">All leads</a></div><div id="pipeline"></div></div>
       </section>
 
-      <section aria-labelledby="pipe-title">
-        <div class="section-head"><h2 id="pipe-title">Leads</h2><p id="updated" class="fine" role="status"></p></div>
-        <div class="pipeline">
-          <div class="col"><h3>New <span id="c-new">0</span></h3><div id="k-new" class="list"></div></div>
-          <div class="col"><h3>Qualified <span id="c-qualified">0</span></h3><div id="k-qualified" class="list"></div></div>
-          <div class="col"><h3>Visit booked <span id="c-visit_booked">0</span></h3><div id="k-visit_booked" class="list"></div></div>
+      <section data-panel="approvals" hidden>
+        <div class="toolbar">
+          <button class="btn btn-quiet" type="button" id="sweep"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg>Find quiet leads</button>
+          <p class="muted">Looks for leads who stopped replying for a day and drafts a follow-up for each.</p>
+        </div>
+        <div id="drafts" class="stack"></div>
+        <details class="box fold" id="handled-box" hidden><summary><h2 id="handled-title">Already handled</h2><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary><div id="handled"></div></details>
+        <details class="box fold"><summary><h2>How approvals work</h2><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+          <div class="muted"><p>The assistant never messages a lead by itself. It writes a draft, and nothing moves forward until someone here approves it. Rejected drafts are kept for the record.</p></div></details>
+      </section>
+
+      <section data-panel="leads" hidden>
+        <div class="toolbar">
+          <div class="find"><svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg><label class="sr" for="q">Search leads</label><input id="q" type="search" placeholder="Search name, area or type" autocomplete="off"></div>
+          <div class="segmented" id="lead-filter" role="group" aria-label="Lead status"></div>
+        </div>
+        <div class="split">
+          <div class="box flush" id="lead-list"></div>
+          <aside class="box detail" id="lead-detail" aria-live="polite"></aside>
         </div>
       </section>
 
-      <section aria-labelledby="visit-title">
-        <div class="section-head"><h2 id="visit-title">Visits</h2></div>
-        <div class="table" tabindex="0" role="region" aria-label="Visits">
-          <table><thead><tr><th scope="col">When</th><th scope="col">Home</th><th scope="col">Lead</th><th scope="col">Status</th></tr></thead><tbody id="visits"></tbody></table>
-        </div>
+      <section data-panel="visits" hidden>
+        <div class="toolbar"><div class="segmented" id="visit-filter" role="group" aria-label="Which visits"></div></div>
+        <div id="agenda" class="stack"></div>
       </section>
 
-      <section aria-labelledby="cost-title">
-        <div class="section-head"><h2 id="cost-title">Assistant costs</h2></div>
-        <div id="usage" class="usage"></div>
+      <section data-panel="costs" hidden>
+        <div class="box" id="spend"></div>
+        <div id="cost-tiles" class="kpis"></div>
+        <details class="box fold"><summary><h2>Tokens used</h2><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary><div id="tokens"></div></details>
       </section>
-    </div>
-  </main>
+    </main>
+  </div>
+  <p id="toast" class="toast" role="status"></p>
+
+  <script src="photos.js"></script>
   <script src="admin.js"></script>
 </body>
 </html>

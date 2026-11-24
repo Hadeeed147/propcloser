@@ -3,114 +3,201 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>PropCloser · Homes in Islamabad, sector by sector</title>
+  <title>PropCloser: homes in Islamabad, sector by sector</title>
   <meta name="description" content="Tell our AI assistant the sector and budget. It finds matching homes in Islamabad and books your visit once you say yes.">
-  <meta name="theme-color" content="#00683f">
+  <meta name="theme-color" content="#14213d">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://images.unsplash.com">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300..700&family=Overpass:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
 </head>
 <body>
-  <a class="skip" href="#listings">Skip to homes</a>
+  <a class="skip" href="#homes">Skip to homes</a>
 
   <header class="topbar">
-    <a class="brand" href="./"><span class="sign" aria-hidden="true">PC</span>PropCloser</a>
-    <nav aria-label="Main">
-      <a href="#listings">Homes</a>
-      <a href="#how">How it works</a>
-      <a href="admin.html">For agencies</a>
-    </nav>
+    <div class="wrap">
+      <a class="brand" href="./"><img src="icon.svg" width="32" height="32" alt="">PropCloser</a>
+      <nav aria-label="Main">
+        <a class="wide" href="#homes">Homes</a>
+        <a class="wide" href="#how">How it works</a>
+        <a href="admin.html">For agencies</a>
+      </nav>
+    </div>
   </header>
 
   <main>
     <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-copy">
+      <img class="hero-photo" alt="" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" width="1600" height="800" sizes="100vw"
+        src="https://images.unsplash.com/photo-1704310703651-a590038329c8?w=1280&amp;q=60&amp;auto=format&amp;fit=crop"
+        srcset="https://images.unsplash.com/photo-1704310703651-a590038329c8?w=720&amp;q=55&amp;auto=format&amp;fit=crop 720w, https://images.unsplash.com/photo-1704310703651-a590038329c8?w=1280&amp;q=60&amp;auto=format&amp;fit=crop 1280w, https://images.unsplash.com/photo-1704310703651-a590038329c8?w=1920&amp;q=60&amp;auto=format&amp;fit=crop 1920w">
+      <div class="wrap">
         <h1 id="hero-title">Which sector is home?</h1>
-        <p>Say it your way, in English or Roman Urdu. Our AI assistant finds homes that fit, works out the monthly installment and holds a visit for you. Nothing is booked until you say yes.</p>
+        <p class="lead">Say it your way, in English or Roman Urdu. Our AI assistant finds homes that fit, works out the monthly installment and holds a visit for you.</p>
         <form class="ask" id="ask-form">
-          <label for="ask-text">What are you looking for?</label>
-          <div class="ask-row">
-            <input id="ask-text" placeholder="3 bed ghar, B-17, dedh crore" autocomplete="off" maxlength="500" enterkeyhint="send">
-            <button class="btn btn-primary" type="submit">Find homes</button>
-          </div>
+          <label class="sr" for="ask-text">What are you looking for?</label>
+          <svg class="i" aria-hidden="true"><use href="icons.svg#search"/></svg>
+          <input id="ask-text" placeholder="3 bed ghar, B-17, dedh crore" autocomplete="off" maxlength="500" enterkeyhint="send">
+          <button class="btn btn-primary" type="submit">Find homes</button>
         </form>
         <div class="examples" id="examples" role="group" aria-label="Examples to try">
           <button type="button">3 bed house in Bahria Town under 3 crore</button>
           <button type="button">E-11 mein flat rent pe, 1.2 lakh tak</button>
           <button type="button">Installment on a 2 crore house</button>
         </div>
+        <ul class="assure">
+          <li><svg class="i" aria-hidden="true"><use href="icons.svg#languages"/></svg>Understands Roman Urdu</li>
+          <li><svg class="i" aria-hidden="true"><use href="icons.svg#calculator"/></svg>Works out installments</li>
+          <li><svg class="i" aria-hidden="true"><use href="icons.svg#calendar"/></svg>Asks before booking</li>
+          <li><svg class="i" aria-hidden="true"><use href="icons.svg#shield"/></svg>Forgets you when you ask</li>
+        </ul>
       </div>
-      <figure class="map-card">
-        <div id="map"></div>
-        <figcaption><span id="map-note">Choose a sector to see its homes.</span> <span class="fine">Schematic, not to scale.</span></figcaption>
-      </figure>
     </section>
 
-    <section id="listings" class="section" aria-labelledby="listings-title">
+    <section class="welcome" id="welcome" aria-labelledby="welcome-title" hidden>
+      <div class="wrap">
+        <h2 id="welcome-title">Welcome back</h2>
+        <div class="welcome-items" id="welcome-items"></div>
+      </div>
+    </section>
+
+    <section id="homes" class="section wrap" aria-labelledby="homes-title">
       <div class="section-head">
-        <h2 id="listings-title">Homes</h2>
+        <h2 id="homes-title">Homes</h2>
         <p id="result-note" role="status"></p>
       </div>
+
       <form id="filters" class="filters" autocomplete="off">
-        <div class="segmented" role="group" aria-label="Buy or rent">
-          <button type="button" data-purpose="sale" aria-pressed="true">Buy</button>
-          <button type="button" data-purpose="rent" aria-pressed="false">Rent</button>
+        <div class="filter-main">
+          <div class="segmented" role="group" aria-label="Buy or rent">
+            <button type="button" data-purpose="sale" aria-pressed="true">Buy</button>
+            <button type="button" data-purpose="rent" aria-pressed="false">Rent</button>
+          </div>
+          <button class="btn btn-quiet only-small" type="button" id="toggle-filters" aria-expanded="false" aria-controls="filter-fields"><svg class="i" aria-hidden="true"><use href="icons.svg#sliders"/></svg>Filters</button>
+          <button class="btn btn-quiet only-narrow" type="button" id="toggle-map" aria-expanded="false" aria-controls="map-card"><svg class="i" aria-hidden="true"><use href="icons.svg#map"/></svg>Map</button>
         </div>
-        <div class="field grow"><label for="f-area">Sector or area</label>
-          <input id="f-area" list="areas" placeholder="Any"><datalist id="areas"></datalist></div>
-        <div class="field"><label for="f-type">Type</label>
-          <select id="f-type"><option value="">Any</option><option value="house">House</option><option value="flat">Flat</option><option value="plot">Plot</option></select></div>
-        <div class="field"><label for="f-beds">Bedrooms</label>
-          <select id="f-beds"><option value="">Any</option><option value="1">1 or more</option><option value="2">2 or more</option><option value="3">3 or more</option><option value="4">4 or more</option><option value="5">5 or more</option></select></div>
-        <div class="field"><label for="f-price">Budget</label><select id="f-price"></select></div>
-        <button class="btn btn-primary" type="submit">Show homes</button>
-        <button class="btn btn-quiet" type="button" id="clear" hidden>Clear filters</button>
+        <div class="filter-fields" id="filter-fields">
+          <div class="field"><label for="f-area">Sector or area</label><select id="f-area"><option value="">Any</option></select></div>
+          <div class="field"><label for="f-type">Type</label>
+            <select id="f-type"><option value="">Any</option><option value="house">House</option><option value="flat">Flat</option><option value="plot">Plot</option></select></div>
+          <div class="field"><label for="f-beds">Bedrooms</label>
+            <select id="f-beds"><option value="">Any</option><option value="1">1 or more</option><option value="2">2 or more</option><option value="3">3 or more</option><option value="4">4 or more</option><option value="5">5 or more</option></select></div>
+          <div class="field"><label for="f-price">Budget</label><select id="f-price"></select></div>
+          <button class="btn btn-quiet" type="button" id="saved-only" aria-pressed="false" hidden><svg class="i" aria-hidden="true"><use href="icons.svg#heart"/></svg><span></span></button>
+          <button class="btn btn-text" type="button" id="clear" hidden>Clear</button>
+        </div>
       </form>
-      <div id="grid" class="grid" aria-live="polite"></div>
+
+      <div class="browse">
+        <div>
+          <div id="grid" class="grid"></div>
+          <button class="btn btn-quiet more-homes" type="button" id="more-homes" hidden></button>
+          <p class="fine photo-note">Sample homes with sample photos, to show how PropCloser works.</p>
+        </div>
+        <figure class="map-card" id="map-card" aria-label="Where the homes are">
+          <div id="map"><p class="map-wait">Loading the map</p></div>
+          <figcaption><span id="map-note">Choose an area to see its homes.</span><span class="fine" id="map-fine">Pins mark the area, not the house.</span></figcaption>
+        </figure>
+      </div>
     </section>
 
-    <section id="how" class="section" aria-labelledby="how-title">
-      <div class="section-head"><h2 id="how-title">How it works</h2></div>
-      <ol class="steps">
-        <li><h3>Say what you need</h3><p>"Dedh crore", "kal 3 baje", "near a park". The assistant understands it and remembers it next time.</p></li>
-        <li><h3>See homes that fit</h3><p>Only real listings from this agency. If nothing fits, it says so and shows the closest.</p></li>
-        <li><h3>Say yes to a visit</h3><p>It holds a time and asks you first. You can move or cancel it in the same chat.</p></li>
-      </ol>
+    <section id="how" class="how" aria-labelledby="how-title">
+      <div class="wrap">
+        <figure class="how-photo">
+          <img alt="A wide avenue in Islamabad leading to the Margalla Hills" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="720" height="900" sizes="(max-width: 900px) 92vw, 440px"
+            src="https://images.unsplash.com/photo-1685103124885-e8b666f4260f?w=720&amp;h=900&amp;q=62&amp;auto=format&amp;fit=crop"
+            srcset="https://images.unsplash.com/photo-1685103124885-e8b666f4260f?w=480&amp;h=600&amp;q=60&amp;auto=format&amp;fit=crop 480w, https://images.unsplash.com/photo-1685103124885-e8b666f4260f?w=720&amp;h=900&amp;q=62&amp;auto=format&amp;fit=crop 720w">
+        </figure>
+        <div class="how-text">
+          <h2 id="how-title">How it works</h2>
+          <div class="accordion">
+            <details name="how" open>
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#message"/></svg><span>Say what you need</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>Write it the way you'd say it: "dedh crore", "kal 3 baje", "park ke paas". English and Roman Urdu both work, and you won't have to repeat yourself next time.</p></div>
+            </details>
+            <details name="how">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#home"/></svg><span>See homes that fit</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>The assistant searches this agency's list and nothing else. If no home matches, it says so and shows the closest ones instead of inventing one.</p></div>
+            </details>
+            <details name="how">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#calculator"/></svg><span>Check the monthly cost</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>Ask for an installment on any price. Unless you say otherwise it assumes 20% down, 10 years and 12% a year. It is an estimate, not a bank's offer.</p></div>
+            </details>
+            <details name="how">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#calendar"/></svg><span>Say yes to a visit</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>It holds a time and asks you first. Nothing is booked until you say yes, and you can move or cancel the visit in the same chat.</p></div>
+            </details>
+          </div>
+
+          <h2 class="second">Good to know</h2>
+          <div class="accordion">
+            <details name="know">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#lock"/></svg><span>What does it remember about me?</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>Your name and what you're looking for, such as area and budget. Never phone, CNIC or card numbers. You can see it or delete it at any time.</p>
+                <p class="row"><button class="btn btn-quiet" type="button" data-open-say="What do you know about me?">See my data</button><button class="btn btn-quiet" type="button" data-open-say="Delete everything you know about me">Delete my data</button></p></div>
+            </details>
+            <details name="know">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#info"/></svg><span>Are these homes and photos real?</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>No. PropCloser is a student project. The homes and prices are sample data, the photos are illustrations, and map pins show the area rather than an address.</p></div>
+            </details>
+            <details name="know">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#user"/></svg><span>Will it message me on its own?</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>No. It only replies to you. If it thinks a follow-up would help, it writes a draft, and a person at the agency approves or rejects it.</p></div>
+            </details>
+            <details name="know">
+              <summary><svg class="i" aria-hidden="true"><use href="icons.svg#shield"/></svg><span>Can it be wrong?</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+              <div><p>Yes, it is AI. Prices and visit times come straight from the agency's records, but check the details that matter to you at the visit.</p></div>
+            </details>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 
   <footer>
-    <p>PropCloser is a student project (AI-4016). The homes shown are sample data, not real offers.</p>
+    <div class="wrap">
+      <p class="brand"><img src="icon.svg" width="32" height="32" alt="">PropCloser</p>
+      <p>A student project for AI-4016. The homes shown are sample data, not real offers. Photos from Unsplash, map from OpenStreetMap.</p>
+      <nav aria-label="Footer"><a href="#homes">Homes</a><a href="#how">How it works</a><a href="admin.html">For agencies</a></nav>
+    </div>
   </footer>
 
   <button class="chat-fab" id="fab" type="button" aria-haspopup="dialog" aria-controls="chat">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
-    <span>Ask the assistant</span>
+    <svg class="i" aria-hidden="true"><use href="icons.svg#message"/></svg><span>Ask<span class="wide"> the assistant</span></span>
   </button>
 
   <section class="chat" id="chat" role="dialog" aria-modal="false" aria-labelledby="chat-title" inert>
     <header class="chat-head">
-      <div><h2 id="chat-title">Property assistant</h2><p>AI. It asks before it books anything.</p></div>
+      <img src="icon.svg" width="36" height="36" alt="">
+      <div><h2 id="chat-title">Property assistant</h2><p>AI. It asks before it books.</p></div>
       <div class="chat-actions">
-        <button id="new-chat" type="button">New chat</button>
-        <button id="close-chat" type="button" aria-label="Close chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <button id="new-chat" type="button" aria-label="New chat" title="New chat"><svg class="i" aria-hidden="true"><use href="icons.svg#newchat"/></svg></button>
+        <button id="close-chat" type="button" aria-label="Close chat" title="Close chat"><svg class="i" aria-hidden="true"><use href="icons.svg#x"/></svg></button>
       </div>
     </header>
+    <details class="about" id="about">
+      <summary><svg class="i" aria-hidden="true"><use href="icons.svg#user"/></svg><span id="about-line">What I remember</span><svg class="i chev" aria-hidden="true"><use href="icons.svg#down"/></svg></summary>
+      <div>
+        <ul id="about-facts" class="chips"></ul>
+        <p class="row"><button class="btn btn-quiet" type="button" data-say="What do you know about me?">See my data</button><button class="btn btn-quiet" type="button" data-say="Delete everything you know about me">Delete my data</button></p>
+      </div>
+    </details>
     <div class="chat-body" id="chat-body" role="log" aria-live="polite" aria-label="Conversation" tabindex="0"></div>
     <div class="quick" id="quick" role="group" aria-label="Suggested replies"></div>
     <form class="chat-input" id="chat-form">
       <label class="sr" for="chat-text">Message</label>
       <input id="chat-text" placeholder="Message" autocomplete="off" maxlength="2000" enterkeyhint="send">
-      <button class="send" id="send" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      <button class="send" id="send" type="submit" aria-label="Send message"><svg class="i" aria-hidden="true"><use href="icons.svg#up"/></svg></button>
     </form>
-    <p class="chat-foot">It can make mistakes, so check details at the visit. It remembers your preferences, never phone or CNIC numbers.
-      <button type="button" data-say="What do you know about me?">See my data</button> <button type="button" data-say="Delete everything you know about me">Delete my data</button></p>
+    <p class="chat-foot">It can make mistakes, so check details at the visit.</p>
   </section>
 
   <script src="map.js"></script>
+  <script src="realmap.js"></script>
+  <script src="photos.js"></script>
+  <script src="me.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

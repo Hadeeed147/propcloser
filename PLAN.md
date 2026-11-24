@@ -228,14 +228,14 @@ can list other users' data.
 ## 8. Website (Vercel, static HTML/CSS/JS — no build step)
 
 **Customer page `/`**
-- "Which sector is home?" with an ask box that starts the chat, and a sector map that filters the homes
+- "Which sector is home?" with an ask box that starts the chat, and a street map of Islamabad (schematic fallback) that filters the homes
 - Homes with filters (area, type, beds, budget) from `GET /listings`
 - Chat widget: `user_id` = random UUID kept in `localStorage`; "New chat" button makes a new `thread_id`
 - Shows tool activity chips ("Searched listings", "Checked slots") from `tool_calls`
 
 **Admin dashboard `/admin`**
-- "Waiting for you" first: follow-ups to approve, and "Find quiet leads" (the sweep); assistant costs at the end
-- Leads pipeline table (status badges, budget, area, timeline)
+- Five views (Today, Approvals, Leads, Visits, Costs): follow-ups to approve come first, with "Find quiet leads" (the sweep)
+- Leads list with search, status filter and a detail panel; visits grouped by day; spend against the cap
 - Visits list (pending / confirmed)
 - Follow-up queue with **Approve / Reject** buttons (this is our human-in-the-loop for sending)
 
