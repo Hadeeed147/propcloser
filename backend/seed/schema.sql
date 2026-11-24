@@ -53,3 +53,9 @@ create table if not exists followups (
   created_at  timestamptz not null default now()
 );
 create index if not exists followups_user_idx on followups (user_id);
+
+-- model spend per day (app/budget.py), so the cap survives restarts
+create table if not exists spend (
+  day  date primary key,
+  usd  double precision not null default 0
+);

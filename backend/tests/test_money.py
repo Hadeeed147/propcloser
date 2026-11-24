@@ -40,4 +40,4 @@ def test_words_reach_the_tool_as_rupees(make_graph, repo):
 def test_unclear_amount_is_returned_to_the_model_not_crashed(make_graph, repo):
     graph, model = make_graph([call("save_lead_profile", budget_pkr="2", area="B-17"), say("Do you mean 2 crore?")])
     assert chat(graph, "cash2", "a", "budget 2")["reply"] == "Do you mean 2 crore?"
-    assert "lakh or crore" in model.seen[-1][-1].text and "cash2" in repo.leads and not repo.leads["cash2"].get("budget_pkr")
+    assert "lakh or crore" in model.seen[-1][-2].text and "cash2" in repo.leads and not repo.leads["cash2"].get("budget_pkr")

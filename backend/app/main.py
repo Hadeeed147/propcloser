@@ -9,17 +9,19 @@ Website endpoints:
 """
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from contextlib import asynccontextmanager
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
-from app import config
+from app import budget, config
 from app.followups import sweep
 from app.graph import build_graph
 from app.repo import MemoryRepo, PostgresRepo, get_repo, search, set_repo
@@ -37,9 +39,12 @@ async def lifespan(app: FastAPI):
         from psycopg.rows import dict_row
         from psycopg_pool import AsyncConnectionPool
 
-        pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=10, open=False,
-                                   kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row})
-        await pool.open()
+        # check= replaces connections Neon closed while it was asleep (it suspends after a few idle minutes)
+        pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=10, open=False, timeout=15, max_idle=120,
+                                   max_lifetime=1800, check=AsyncConnectionPool.check_connection,
+                                   kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row,
+                                           "connect_timeout": 10, "keepalives": 1, "keepalives_idle": 30})
+        await pool.open(wait=True, timeout=60)
         checkpointer, store, repo = AsyncPostgresSaver(pool), AsyncPostgresStore(pool), PostgresRepo(pool)
         await checkpointer.setup()
         await store.setup()
@@ -53,6 +58,9 @@ async def lifespan(app: FastAPI):
                     "(memory is lost on restart).")
     await repo.setup()
     set_repo(repo)
+    budget.METER.total = max(budget.METER.total, await repo.spent_usd())
+    if config.DATABASE_URL and not admin_token_ok():
+        log.error("ADMIN_TOKEN is missing or weak: the admin API stays closed until it is set (12+ characters)")
     app.state.graph = build_graph(checkpointer=checkpointer, store=store)
     yield
     await repo.close()
@@ -64,20 +72,44 @@ app.add_middleware(CORSMiddleware, allow_origins=config.ALLOWED_ORIGINS, allow_m
 
 # ── graded API ──
 
+def _text(value) -> str:
+    """Clients send numbers, nulls and stray NUL bytes (which Postgres rejects). Accept them all as text."""
+    return "" if value is None else str(value).replace("\x00", "").strip()
+
+
+Text = Annotated[str, BeforeValidator(_text)]
+
+
 class ChatIn(BaseModel):
-    user_id: str = Field(min_length=1, max_length=128)
-    thread_id: str = Field(min_length=1, max_length=128)
-    message: str = Field(default="", max_length=8000)
+    user_id: Text = Field(min_length=1, max_length=256)
+    thread_id: Text = Field(default="default", max_length=256)
+    message: Text = ""
 
 
 @app.post("/chat")
 async def chat(body: ChatIn, request: Request):
-    return await run_chat(request.app.state.graph, body.user_id.strip(), body.thread_id.strip(), body.message)
+    return await run_chat(request.app.state.graph, body.user_id, body.thread_id or "default", body.message)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 async def health():
     return "ok"
+
+
+@app.get("/ready")
+async def ready():
+    """Deeper check than /health: can we really serve? Costs no tokens. Used by the keep-alive ping."""
+    try:
+        database = await get_repo().ping()
+    except Exception as exc:
+        log.error("READY: database check failed: %s", exc)
+        database = False
+    problems = [p for p, bad in {"database unreachable": not database,
+                                 "in-memory storage (set DATABASE_URL)": get_repo().kind != "postgres",
+                                 "ANTHROPIC_API_KEY missing": not os.getenv("ANTHROPIC_API_KEY"),
+                                 "spend cap reached": not budget.METER.allow()}.items() if bad]
+    return JSONResponse(status_code=503 if problems else 200,
+                        content={"ready": not problems, "storage": get_repo().kind, "problems": problems})
 
 
 @app.exception_handler(RequestValidationError)
@@ -114,8 +146,14 @@ async def listings(purpose: Literal["sale", "rent"] = "sale", area: Optional[str
 
 # ── admin dashboard ──
 
+def admin_token_ok() -> bool:
+    return len(config.ADMIN_TOKEN) >= 12 and config.ADMIN_TOKEN != "change-me"
+
+
 def require_admin(x_admin_token: str = Header(default="")):
-    if x_admin_token != config.ADMIN_TOKEN:
+    if config.DATABASE_URL and not admin_token_ok():      # deployed with a default token: closed, not open
+        raise HTTPException(status_code=503, detail="Set ADMIN_TOKEN (12+ characters) on the server")
+    if not hmac.compare_digest(x_admin_token.encode(), config.ADMIN_TOKEN.encode()):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
@@ -126,6 +164,11 @@ class FollowupDecision(BaseModel):
 @app.get("/admin/stats", dependencies=[Depends(require_admin)])
 async def admin_stats():
     return await get_repo().stats()
+
+
+@app.get("/admin/usage", dependencies=[Depends(require_admin)])
+async def admin_usage():
+    return budget.METER.report()
 
 
 @app.get("/admin/leads", dependencies=[Depends(require_admin)])

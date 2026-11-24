@@ -23,13 +23,14 @@ def draft(lead: dict, matches: list[dict]) -> str:
 async def sweep(repo, idle_hours: float = 24, now: datetime | None = None) -> list[dict]:
     now = now or now_pkt()
     waits = (timedelta(hours=idle_hours), *STEPS_AFTER)
-    followups = await repo.admin_followups()
     listings = await repo.all_listings()
     drafted = []
-    for lead in await repo.admin_leads():
+    for lead in await repo.all_leads():
         if lead["status"] == "visit_booked" or not (lead.get("area") or lead.get("budget_pkr")):
             continue
-        mine = [f for f in followups if f["user_id"] == lead["user_id"] and f["created_at"] >= lead["updated_at"]]
+        if now - lead["updated_at"] < waits[0]:
+            continue
+        mine = [f for f in await repo.followups_for(lead["user_id"]) if f["created_at"] >= lead["updated_at"]]
         if len(mine) >= len(waits) or any(f["status"] == "pending_approval" for f in mine):
             continue
         if now - lead["updated_at"] < waits[len(mine)]:

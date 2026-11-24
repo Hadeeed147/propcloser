@@ -5,7 +5,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from app.approval import is_exact_yes, is_yes
-from app.prompts import system_message
+from app.prompts import request_messages
 from app.repo import slot_id, upcoming_slots
 from app.service import FALLBACK, thread_key
 from conftest import assert_tool_calls_answered, call, payload, say, two_calls
@@ -25,7 +25,7 @@ def history(graph, user, thread):
 
 def assert_claude_would_accept(graph, user, thread):
     msgs = history(graph, user, thread)
-    assert_tool_calls_answered(payload([system_message({}, None), *msgs, HumanMessage("next")]))
+    assert_tool_calls_answered(payload(request_messages([*msgs, HumanMessage("next")], {}, None)))
 
 
 # ── several tools in one message ──
@@ -35,13 +35,13 @@ def test_two_saves_in_one_message_both_apply(make_graph):
                                say("Noted."), say("G-13, 3 beds.")])
     assert chat(graph, "par1", "a", "3 beds in G-13")["reply"] == "Noted."
     chat(graph, "par1", "b", "what did I want?")
-    memory = model.seen[-1][0].text
+    memory = model.seen[-1][-1].text
     assert "area: G-13" in memory and "beds: 3" in memory
 
 
 def test_save_and_hold_in_one_message(make_graph, repo):
     graph, model = make_graph([two_calls(("save_lead_profile", {"area": "Bahria Town"}),
-                                         ("request_visit", {"listing_id": 2, "slot": SLOTS[0]})), say("Shall I book?")])
+                                         ("request_visit", {"listing_id": 2, "when": SLOTS[0]})), say("Shall I book?")])
     out = chat(graph, "par2", "a", "Bahria, book listing 2 on the first slot")
     assert out["reply"] == "Shall I book?" and repo.visits[0]["status"] == "pending"
     assert repo.leads["par2"]["area"] == "Bahria Town"
@@ -79,13 +79,13 @@ def hold(graph, user, thread="t", listing=2, slot=None):
     return chat(graph, user, thread, "book it on the first slot please")
 
 
-def test_yes_books_with_one_model_call(make_graph, repo):
-    graph, model = make_graph([call("request_visit", listing_id=2, slot=SLOTS[0]), say("Shall I confirm?"),
-                               say("Booked!"), say("It is already booked.")])
+def test_yes_books_without_any_model_call(make_graph, repo):
+    graph, model = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Shall I confirm?"),
+                               say("It is already booked.")])
     hold(graph, "y1")
     before = len(model.seen)
     out = chat(graph, "y1", "t", "haan ji")
-    assert names(out) == ["confirm_visit"] and out["reply"] == "Booked!" and len(model.seen) - before == 1
+    assert names(out) == ["confirm_visit"] and "book ho gaya" in out["reply"] and len(model.seen) == before
     assert repo.visits[0]["status"] == "confirmed"
     again = chat(graph, "y1", "t", "yes")                          # retry / double tap
     assert names(again) == [] and [v["status"] for v in repo.visits] == ["confirmed"]
@@ -93,7 +93,7 @@ def test_yes_books_with_one_model_call(make_graph, repo):
 
 
 def test_not_a_yes_does_not_book(make_graph, repo):
-    graph, _ = make_graph([call("request_visit", listing_id=2, slot=SLOTS[0]), say("Shall I confirm?"),
+    graph, _ = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Shall I confirm?"),
                            say("Here are cheaper ones.")])
     hold(graph, "n1")
     chat(graph, "n1", "t", "ok show me cheaper ones")
@@ -101,7 +101,7 @@ def test_not_a_yes_does_not_book(make_graph, repo):
 
 
 def test_yes_to_a_different_question_does_not_book(make_graph, repo):
-    graph, _ = make_graph([call("request_visit", listing_id=2, slot=SLOTS[0]), say("Shall I confirm?"),
+    graph, _ = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Shall I confirm?"),
                            say("Should I also search G-13?"), call("search_listings", area="G-13"), say("Here is G-13.")])
     hold(graph, "d1")
     chat(graph, "d1", "t", "what about other areas")
@@ -110,19 +110,18 @@ def test_yes_to_a_different_question_does_not_book(make_graph, repo):
 
 
 def test_slot_taken_before_the_yes(make_graph, repo):
-    graph, _ = make_graph([call("request_visit", listing_id=2, slot=SLOTS[0]), say("Confirm?"),
-                           call("request_visit", listing_id=2, slot=SLOTS[0]), say("Confirm?"),
-                           say("Booked!"), say("Sorry, that slot just went.")])
+    graph, _ = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Confirm?"),
+                           call("request_visit", listing_id=2, when=SLOTS[0]), say("Confirm?")])
     hold(graph, "s1")
     hold(graph, "s2")
     chat(graph, "s1", "t", "yes")
-    chat(graph, "s2", "t", "yes")
+    assert "just taken" in chat(graph, "s2", "t", "yes")["reply"]
     assert {v["user_id"]: v["status"] for v in repo.visits} == {"s1": "confirmed", "s2": "pending"}
 
 
 def test_a_new_hold_replaces_the_old_one(make_graph, repo):
-    graph, _ = make_graph([call("request_visit", listing_id=2, slot=SLOTS[0]), say("Confirm?"),
-                           call("request_visit", listing_id=2, slot=SLOTS[1]), say("Confirm the new time?")])
+    graph, _ = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Confirm?"),
+                           call("request_visit", listing_id=2, when=SLOTS[1]), say("Confirm the new time?")])
     hold(graph, "r1")
     chat(graph, "r1", "t", "actually the next slot")
     assert [v["status"] for v in repo.visits] == ["cancelled", "pending"]
@@ -131,14 +130,14 @@ def test_a_new_hold_replaces_the_old_one(make_graph, repo):
 # ── cancel and reschedule ──
 
 def booked(make_graph, user, *more):
-    graph, model = make_graph([call("request_visit", listing_id=2, slot=SLOTS[0]), say("Confirm?"), say("Booked!"), *more])
+    graph, model = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Confirm?"), *more])
     hold(graph, user)
     chat(graph, user, "t", "yes")
     return graph, model
 
 
 def test_cancel_asks_first_then_cancels(make_graph, repo):
-    graph, _ = booked(make_graph, "c1", call("cancel_visit", visit_id=1), say("Cancelled."))
+    graph, _ = booked(make_graph, "c1", call("cancel_visit", visit_id=1))
     out = chat(graph, "c1", "t", "cancel my visit")
     assert names(out) == [] and "cancel" in out["reply"].lower() and repo.visits[0]["status"] == "confirmed"
     out = chat(graph, "c1", "t", "yes")
@@ -155,7 +154,7 @@ def test_cannot_cancel_someone_elses_visit(make_graph, repo):
 
 
 def test_reschedule_swaps_only_after_yes(make_graph, repo):
-    graph, _ = booked(make_graph, "m1", call("reschedule_visit", visit_id=1, slot=SLOTS[4]), say("Move it?"), say("Moved."))
+    graph, _ = booked(make_graph, "m1", call("reschedule_visit", visit_id=1, when=SLOTS[4]), say("Move it?"))
     chat(graph, "m1", "t", "move my visit")
     assert [v["status"] for v in repo.visits] == ["confirmed", "pending"]
     chat(graph, "m1", "t", "yes")

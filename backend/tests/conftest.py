@@ -44,6 +44,12 @@ class ScriptedModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=self.script.pop(0))])
 
 
+@pytest.fixture(autouse=True)
+def fresh_meter(monkeypatch):
+    from app import budget
+    monkeypatch.setattr(budget, "METER", budget.SpendMeter(total_cap=1.0, hourly_cap=1.0))
+
+
 @pytest.fixture
 def repo():
     r = MemoryRepo()
@@ -64,8 +70,8 @@ def payload(messages):
     import os
     os.environ.setdefault("ANTHROPIC_API_KEY", "test-not-a-real-key")
     from app.graph import make_model
-    from app.tools import TOOLS
-    bound = make_model().bind_tools(TOOLS)
+    from app.tools import TOOL_SPECS
+    bound = make_model().bind_tools(TOOL_SPECS)
     return bound.bound._get_request_payload(messages, **bound.kwargs)
 
 

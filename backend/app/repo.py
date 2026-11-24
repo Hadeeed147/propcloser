@@ -156,12 +156,14 @@ class MemoryRepo:
         self.visits.append(visit)
         return visit
 
-    async def confirm_visit(self, user_id: str, visit_id: int) -> dict | None:
+    async def confirm_visit(self, user_id: str, visit_id: int, replaces: int | None = None) -> dict | None:
         visit = next((v for v in self.visits if v["id"] == visit_id and v["user_id"] == user_id
                       and v["status"] == "pending"), None)
         if not visit or visit["slot_time"] in await self.booked_slots(visit["listing_id"]):
             return None
         visit["status"] = "confirmed"
+        if replaces:
+            await self.cancel_visit(user_id, replaces)
         return visit
 
     async def cancel_visit(self, user_id: str, visit_id: int, only_pending: bool = False) -> dict | None:
@@ -176,6 +178,25 @@ class MemoryRepo:
 
     async def delete_lead(self, user_id: str):
         self.leads.pop(user_id, None)
+        self.followups = [f for f in self.followups if f["user_id"] != user_id or f["status"] != "pending_approval"]
+
+    async def followups_for(self, user_id: str) -> list[dict]:
+        return [f for f in self.followups if f["user_id"] == user_id]
+
+    async def all_leads(self) -> list[dict]:
+        return list(self.leads.values())
+
+    async def thread_ids(self, prefix: str) -> list[str]:
+        return []                                   # in-memory checkpoints are found by the service directly
+
+    async def ping(self) -> bool:
+        return True
+
+    async def spent_usd(self) -> float:
+        return 0.0
+
+    async def add_spend(self, usd: float):
+        return None
 
     async def user_visits(self, user_id: str) -> list[dict]:
         out = []
@@ -280,12 +301,18 @@ class PostgresRepo:
             "insert into visits (user_id, listing_id, slot_time) values (%s, %s, %s) returning *",
             (user_id, listing_id, slot_time))
 
-    async def confirm_visit(self, user_id: str, visit_id: int) -> dict | None:
+    async def confirm_visit(self, user_id: str, visit_id: int, replaces: int | None = None) -> dict | None:
+        """Confirm, and for a reschedule cancel the old visit, in ONE transaction: both happen or neither does."""
         from psycopg import errors
         try:
-            return await self._one(
-                "update visits set status = 'confirmed' where id = %s and user_id = %s and status = 'pending' "
-                "returning *", (visit_id, user_id))
+            async with self.pool.connection() as conn, conn.transaction():
+                cur = await conn.execute("update visits set status = 'confirmed' where id = %s and user_id = %s "
+                                         "and status = 'pending' returning *", (visit_id, user_id))
+                visit = await cur.fetchone()
+                if visit and replaces:
+                    await conn.execute("update visits set status = 'cancelled' where id = %s and user_id = %s",
+                                       (replaces, user_id))
+                return visit
         except errors.UniqueViolation:      # someone else confirmed that slot first
             return None
 
@@ -299,6 +326,28 @@ class PostgresRepo:
 
     async def delete_lead(self, user_id: str):
         await self._all("delete from leads where user_id = %s returning user_id", (user_id,))
+        await self._all("delete from followups where user_id = %s and status = 'pending_approval' returning id", (user_id,))
+
+    async def followups_for(self, user_id: str) -> list[dict]:
+        return await self._all("select * from followups where user_id = %s", (user_id,))
+
+    async def all_leads(self) -> list[dict]:
+        return await self._all("select * from leads where status <> 'visit_booked'")
+
+    async def thread_ids(self, prefix: str) -> list[str]:
+        rows = await self._all("select distinct thread_id from checkpoints where left(thread_id, %s) = %s",
+                               (len(prefix), prefix))
+        return [r["thread_id"] for r in rows]
+
+    async def ping(self) -> bool:
+        return bool(await self._one("select 1 as ok"))
+
+    async def spent_usd(self) -> float:
+        return float((await self._one("select coalesce(sum(usd), 0) as usd from spend"))["usd"])
+
+    async def add_spend(self, usd: float):
+        await self._all("insert into spend (day, usd) values (current_date, %s) "
+                        "on conflict (day) do update set usd = spend.usd + excluded.usd returning day", (usd,))
 
     async def user_visits(self, user_id: str) -> list[dict]:
         return await self._all(

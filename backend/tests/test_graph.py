@@ -32,10 +32,9 @@ def test_booking_needs_a_later_yes(make_graph, repo):
     slot = slot_id(upcoming_slots()[0])
     graph, _ = make_graph([
         # turn 1: lead asks to book -> hold the slot, then ask
-        call("request_visit", listing_id=2, slot=slot),
+        call("request_visit", listing_id=2, when=slot),
         call("confirm_visit"),                       # model jumps the gun: the gate must block it
-        # turn 2: lead says yes -> confirm_fast writes the call itself, the model only phrases the reply
-        say("Booked! See you then."),
+        # turn 2: lead says yes -> confirm_fast acts and say_done replies: no model call at all
     ])
     first = chat(graph, "lead", "t", f"Book a visit to #2 at {slot}")
     assert "confirm" in first["reply"].lower()
@@ -63,9 +62,9 @@ def test_long_term_memory_across_threads(make_graph):
     ])
     chat(graph, "ali", "first", "I'm Ali, 5 marla in B-17 for 1.5 crore, buying in 3 months")
     chat(graph, "ali", "second", "Hi again, what area was I interested in?")
-    system_prompt = model.seen[-1][0].text
+    system_prompt = model.seen[-1][-1].text
     assert "B-17" in system_prompt and "1.5 crore" in system_prompt
-    assert len(model.seen[-1]) == 2              # new thread: only system + this message (no old chat)
+    assert len(model.seen[-1]) == 3              # new thread: only system + this message + context (no old chat)
 
 
 def test_users_sharing_a_thread_id_are_isolated(make_graph, repo):
@@ -76,7 +75,7 @@ def test_users_sharing_a_thread_id_are_isolated(make_graph, repo):
     chat(graph, "alice", "shared", "My budget is 4 crore for F-11")
     chat(graph, "bob", "shared", "What is my budget and area?")
     bob_view = model.seen[-1]
-    assert "F-11" not in bob_view[0].text                     # not in Bob's long-term memory
+    assert "F-11" not in bob_view[-1].text                     # not in Bob's long-term memory
     assert all("4 crore" not in m.text for m in bob_view[1:])    # not in Bob's short-term memory
     assert "bob" not in repo.leads or repo.leads["bob"].get("area") is None
 

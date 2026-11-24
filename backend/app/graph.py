@@ -6,8 +6,9 @@ START -> guard -(blocked)-> refuse -> END
                                          -(risky tool)-> approval_gate -(already said yes)-> tools
                                                                        -(not yet: asks)-> update_pipeline
                                          -(no tools)-> update_pipeline -> END
+A confirm_fast action ends in say_done (a fixed reply in the lead's language): the whole turn costs 0 tokens.
 
-Only `closer` calls the model. Everything else is plain code.
+Only `closer` calls the model, at most MAX_MODEL_CALLS times per turn. Everything else is plain code.
 """
 from __future__ import annotations
 
@@ -28,9 +29,10 @@ from app import config
 from app.approval import is_exact_yes, is_yes
 from app.context import Ctx
 from app.guard import check_message, refusal_for
-from app.prompts import system_message
+from app.prompts import request_messages
+from app.replies import reply_for
 from app.repo import get_repo, lead_status
-from app.tools import RISKY_TOOLS, TOOLS, full_memory, visit_label
+from app.tools import RISKY_TOOLS, TOOL_SPECS, TOOLS, full_memory, tool_error, visit_label
 
 log = logging.getLogger("propcloser")
 NOT_EXECUTED = "Not executed"
@@ -54,6 +56,18 @@ def human_turns(messages: list[AnyMessage]) -> int:
     return sum(isinstance(m, HumanMessage) for m in messages)
 
 
+def without_blocked(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """Drop refused attacks and our refusal, so the attack text never reaches the model on a later turn."""
+    out: list[AnyMessage] = []
+    for m in messages:
+        if isinstance(m, AIMessage) and m.additional_kwargs.get("blocked"):
+            if out and isinstance(out[-1], HumanMessage):
+                out.pop()
+            continue
+        out.append(m)
+    return out
+
+
 def window(messages: list[AnyMessage], n: int) -> list[AnyMessage]:
     """Last ~n messages, always starting at a user message so tool calls are never split."""
     if len(messages) <= n:
@@ -62,6 +76,15 @@ def window(messages: list[AnyMessage], n: int) -> list[AnyMessage]:
     while start > 0 and not isinstance(messages[start], HumanMessage):
         start -= 1
     return messages[start:]
+
+
+def model_calls_this_turn(messages: list[AnyMessage]) -> int:
+    count = 0
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            break
+        count += isinstance(m, AIMessage)
+    return count
 
 
 def last_human_text(messages: list[AnyMessage]) -> str:
@@ -81,11 +104,13 @@ def make_model() -> ChatAnthropic:
       system prompt changes between turns (ours does: it carries the lead's memory)
     """
     return ChatAnthropic(model=config.MODEL, max_tokens=config.MAX_TOKENS, thinking={"type": "disabled"},
-                         effort=config.EFFORT, timeout=20, max_retries=2)
+                         effort=config.EFFORT, timeout=config.MODEL_TIMEOUT_S, max_retries=config.MODEL_RETRIES)
 
 
 def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None):
-    model = (llm or make_model()).bind_tools(TOOLS)
+    base = llm or make_model()
+    model = base.bind_tools(TOOL_SPECS)
+    final_model = base.bind_tools(TOOL_SPECS, tool_choice={"type": "none"})      # last allowed call: must answer in words
 
     # ── nodes ──
 
@@ -93,7 +118,7 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
         return {"blocked_reason": check_message(state["messages"][-1].text)}
 
     def refuse(state: State) -> dict:
-        return {"messages": [AIMessage(refusal_for(state.get("blocked_reason")))]}
+        return {"messages": [AIMessage(refusal_for(state.get("blocked_reason")), additional_kwargs={"blocked": True})]}
 
     async def load_profile(state: State, runtime: Runtime[Ctx]) -> dict:
         return {"lead_profile": await full_memory(runtime.store, runtime.context.user_id)}
@@ -106,12 +131,24 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
         return {"messages": [AIMessage(content="", tool_calls=[call])]}
 
     async def closer(state: State) -> dict:
-        system = system_message(state.get("lead_profile") or {}, state.get("pending_action"))
-        reply = await model.ainvoke([system, *window(state["messages"], config.HISTORY_MESSAGES)])
-        if not reply.tool_calls and not reply.text.strip():      # refused or cut off: never send an empty bubble
-            log.warning("empty model reply, stop_reason=%s", reply.response_metadata.get("stop_reason"))
-            reply = AIMessage(EMPTY_REPLY, id=reply.id, usage_metadata=reply.usage_metadata)
+        history = window(without_blocked(state["messages"]), config.HISTORY_MESSAGES)
+        last_call = model_calls_this_turn(state["messages"]) >= config.MAX_MODEL_CALLS - 1
+        reply = await (final_model if last_call else model).ainvoke(
+            request_messages(history, state.get("lead_profile") or {}, state.get("pending_action")))
+        stop = reply.response_metadata.get("stop_reason")
+        if stop == "max_tokens" and reply.tool_calls:            # a cut-off tool call may have wrong arguments
+            log.warning("reply cut off at max_tokens inside a tool call")
+        unusable = reply.tool_calls and (last_call or stop == "max_tokens")
+        if unusable or (not reply.tool_calls and not reply.text.strip()):     # never an empty bubble
+            log.warning("replacing unusable model reply, stop_reason=%s last_call=%s", stop, last_call)
+            reply = AIMessage(reply.text.strip() or EMPTY_REPLY, id=reply.id, usage_metadata=reply.usage_metadata)
         return {"messages": [reply]}
+
+    def say_done(state: State) -> dict:
+        """The lead confirmed and the action ran: answer from a template, no model call."""
+        artifact = getattr(state["messages"][-1], "artifact", None) or {"reply": "gone", "what": ""}
+        recent = [m.text for m in state["messages"] if isinstance(m, HumanMessage)][-4:]
+        return {"messages": [AIMessage(reply_for(artifact["reply"], artifact["what"], recent))]}
 
     async def approval_gate(state: State, runtime: Runtime[Ctx]) -> Command[Literal["tools", "update_pipeline"]]:
         """Human-in-the-loop without interrupt(): a risky call runs only after the lead's yes in a later message."""
@@ -175,8 +212,10 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
     def route_after_guard(state: State) -> Literal["refuse", "load_profile"]:
         return "refuse" if state.get("blocked_reason") else "load_profile"
 
-    def route_after_load(state: State) -> Literal["confirm_fast", "closer"]:
+    def route_after_load(state: State) -> Literal["confirm_fast", "say_done", "closer"]:
         last = state["messages"][-1]
+        if isinstance(last, ToolMessage) and last.tool_call_id.startswith("yes_"):
+            return "say_done"
         pending = waiting_since_earlier(state)
         # Only the message right after the question: a later "yes" may be answering something else.
         answers_it = pending and human_turns(state["messages"]) == pending["human_turn"] + 1
@@ -196,15 +235,17 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
     g.add_node("load_profile", load_profile)
     g.add_node("confirm_fast", confirm_fast)
     g.add_node("closer", closer)
-    g.add_node("tools", ToolNode(TOOLS, handle_tool_errors=True))
+    g.add_node("say_done", say_done)
+    g.add_node("tools", ToolNode(TOOLS, handle_tool_errors=tool_error))
     g.add_node("approval_gate", approval_gate)
     g.add_node("update_pipeline", update_pipeline)
 
     g.add_edge(START, "guard")
     g.add_conditional_edges("guard", route_after_guard, ["refuse", "load_profile"])
     g.add_edge("refuse", END)
-    g.add_conditional_edges("load_profile", route_after_load, ["confirm_fast", "closer"])
+    g.add_conditional_edges("load_profile", route_after_load, ["confirm_fast", "say_done", "closer"])
     g.add_edge("confirm_fast", "tools")
+    g.add_edge("say_done", "update_pipeline")
     g.add_conditional_edges("closer", route_after_closer, ["tools", "approval_gate", "update_pipeline"])
     g.add_edge("tools", "load_profile")
     g.add_edge("update_pipeline", END)

@@ -1,8 +1,8 @@
 name: keep-alive
 
-# Pings the deployed API so it stays warm during evaluation (Tue 24 – Wed 25 Nov).
-# Set the repository variable API_URL (Settings → Secrets and variables → Actions → Variables),
-# e.g. https://your-name-propcloser-api.hf.space
+# Keeps the API process AND the database awake during evaluation. /ready costs no tokens.
+# Needs the repository variable API_URL (Settings → Secrets and variables → Actions → Variables).
+# GitHub may delay scheduled runs; this reduces cold starts, it does not guarantee none.
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -13,4 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ vars.API_URL != '' }}
     steps:
-      - run: curl -fsS --max-time 60 "${{ vars.API_URL }}/health" && echo
+      - run: |
+          curl -fsS --max-time 90 --retry 3 --retry-all-errors "${{ vars.API_URL }}/health"
+          echo
+          curl -sS --max-time 60 "${{ vars.API_URL }}/ready"
