@@ -17,12 +17,15 @@ from pathlib import Path
 import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
+FALLBACK_START = "Sorry, I hit a problem"      # start of service.FALLBACK: a failed call must never count as a pass
 
 
 def check(case: dict, turns_out: list[dict]) -> tuple[bool, str]:
     rules = case.get("check", {})
     final = turns_out[-1]
     reply = final.get("reply", "")
+    if any(t.get("reply", "").startswith(FALLBACK_START) for t in turns_out):
+        return False, "fallback reply: the model call failed (see the API logs)"
     used = [c["name"] for t in turns_out for c in t.get("tool_calls", [])]
     final_tools = [c["name"] for c in final.get("tool_calls", [])]
     for tool in rules.get("expect_tools", []):

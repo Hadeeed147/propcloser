@@ -57,3 +57,32 @@ def make_graph(repo):
         model = ScriptedModel(script=list(script))
         return build_graph(llm=model, checkpointer=InMemorySaver(), store=InMemoryStore()), model
     return _make
+
+
+def payload(messages):
+    """The exact JSON request the REAL Claude client would send (built locally, nothing is sent)."""
+    import os
+    os.environ.setdefault("ANTHROPIC_API_KEY", "test-not-a-real-key")
+    from app.graph import make_model
+    from app.tools import TOOLS
+    bound = make_model().bind_tools(TOOLS)
+    return bound.bound._get_request_payload(messages, **bound.kwargs)
+
+
+def assert_tool_calls_answered(request: dict):
+    """Claude rejects a history where a tool_use has no tool_result in the next message."""
+    msgs = request["messages"]
+    for i, m in enumerate(msgs):
+        if m["role"] != "assistant" or isinstance(m["content"], str):
+            continue
+        asked = {b["id"] for b in m["content"] if b["type"] == "tool_use"}
+        if asked:
+            nxt = msgs[i + 1]["content"] if i + 1 < len(msgs) else []
+            got = {b.get("tool_use_id") for b in nxt if isinstance(b, dict) and b["type"] == "tool_result"}
+            assert asked == got, f"orphan tool calls: {asked ^ got}"
+
+
+def two_calls(*pairs) -> AIMessage:
+    """One AI message that calls several tools at once."""
+    return AIMessage(content="", usage_metadata=USAGE, tool_calls=[
+        {"name": n, "args": a, "id": f"call_{next(_ids)}", "type": "tool_call"} for n, a in pairs])

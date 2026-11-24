@@ -64,7 +64,7 @@ def test_long_term_memory_across_threads(make_graph):
     ])
     chat(graph, "ali", "first", "I'm Ali, 5 marla in B-17 for 1.5 crore, buying in 3 months")
     chat(graph, "ali", "second", "Hi again, what area was I interested in?")
-    system_prompt = model.seen[-1][0].content
+    system_prompt = model.seen[-1][0].text
     assert "B-17" in system_prompt and "1.5 crore" in system_prompt
     assert len(model.seen[-1]) == 2              # new thread: only system + this message (no old chat)
 
@@ -77,7 +77,7 @@ def test_users_sharing_a_thread_id_are_isolated(make_graph, repo):
     chat(graph, "alice", "shared", "My budget is 4 crore for F-11")
     chat(graph, "bob", "shared", "What is my budget and area?")
     bob_view = model.seen[-1]
-    assert "F-11" not in bob_view[0].content                     # not in Bob's long-term memory
+    assert "F-11" not in bob_view[0].text                     # not in Bob's long-term memory
     assert all("4 crore" not in m.text for m in bob_view[1:])    # not in Bob's short-term memory
     assert "bob" not in repo.leads or repo.leads["bob"].get("area") is None
 

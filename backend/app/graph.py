@@ -10,12 +10,13 @@ Only `closer` calls the model. Everything else is plain code, so most turns cost
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Annotated, Literal, TypedDict
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -25,11 +26,14 @@ from langgraph.types import Command
 from app import config
 from app.context import Ctx
 from app.guard import check_message, refusal_for
-from app.prompts import build_system_prompt
+from app.prompts import system_message
 from app.repo import get_repo, lead_status
 from app.tools import RISKY_TOOLS, TOOLS, read_profile
 
+log = logging.getLogger("propcloser")
 NOT_EXECUTED = "Not executed"
+EMPTY_REPLY = ("I can help you buy or rent property in Islamabad. "
+               "Could you tell me the area, your budget and what kind of place you want?")
 YES = re.compile(r"\b(yes|yeah|yep|yup|confirm(ed)?|ok(ay)?|sure|book it|go ahead|done|haan|han|ji|jee|"
                  r"theek hai|thik hai|kar do|kardo)\b", re.I)
 NO = re.compile(r"^\s*(no|nope)\b|\b(not now|cancel|don'?t book|nahi|nahin)\b", re.I)
@@ -60,9 +64,18 @@ def last_human_text(messages: list[AnyMessage]) -> str:
     return next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
 
 
+def make_model() -> ChatAnthropic:
+    """claude-haiku-5-5 settings that matter:
+    - no temperature/top_p: this model rejects any non-default value with a 400
+    - thinking off: it is ON by default, is billed as output, and its blocks become invalid when the
+      system prompt changes between turns (ours does: it carries the lead's memory)
+    """
+    return ChatAnthropic(model=config.MODEL, max_tokens=config.MAX_TOKENS, thinking={"type": "disabled"},
+                         effort=config.EFFORT, timeout=20, max_retries=2)
+
+
 def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None):
-    model = (llm or ChatAnthropic(model=config.MODEL, max_tokens=config.MAX_TOKENS, temperature=0.2,
-                                  timeout=30, max_retries=2)).bind_tools(TOOLS)
+    model = (llm or make_model()).bind_tools(TOOLS)
 
     # ── nodes ──
 
@@ -76,8 +89,11 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
         return {"lead_profile": await read_profile(runtime.store, runtime.context.user_id)}
 
     async def closer(state: State) -> dict:
-        system = SystemMessage(build_system_prompt(state.get("lead_profile") or {}, state.get("pending_action")))
+        system = system_message(state.get("lead_profile") or {}, state.get("pending_action"))
         reply = await model.ainvoke([system, *window(state["messages"], config.HISTORY_MESSAGES)])
+        if not reply.tool_calls and not reply.text.strip():      # refused or cut off: never send an empty bubble
+            log.warning("empty model reply, stop_reason=%s", reply.response_metadata.get("stop_reason"))
+            reply = AIMessage(EMPTY_REPLY, id=reply.id, usage_metadata=reply.usage_metadata)
         return {"messages": [reply]}
 
     def approval_gate(state: State) -> Command[Literal["tools", "update_pipeline"]]:

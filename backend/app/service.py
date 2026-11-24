@@ -76,7 +76,7 @@ async def run_chat(graph, user_id: str, thread_id: str, message: str) -> dict:
                 graph.ainvoke({"messages": [HumanMessage(message)]}, cfg, context=Ctx(user_id=user_id)),
                 timeout=config.REQUEST_TIMEOUT_S)
             return summarize(out["messages"][before:])
-        except Exception:
-            log.exception("chat failed for %s", cfg["configurable"]["thread_id"])
+        except Exception as exc:                         # friendly to the lead, loud in the logs
+            log.exception("CHAT FAILED %s: %s: %s", cfg["configurable"]["thread_id"], type(exc).__name__, exc)
             await repair_thread(graph, cfg)
             return empty_response(FALLBACK)
