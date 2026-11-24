@@ -109,7 +109,8 @@ def test_yes_to_a_different_question_does_not_book(make_graph, repo):
     assert names(out) == ["search_listings"] and repo.visits[0]["status"] == "pending"
 
 
-def test_slot_taken_before_the_yes(make_graph, repo):
+def test_slot_taken_before_the_yes(make_graph, repo, monkeypatch):
+    monkeypatch.setattr("app.config.SLOT_CAPACITY", 1)
     graph, _ = make_graph([call("request_visit", listing_id=2, when=SLOTS[0]), say("Confirm?"),
                            call("request_visit", listing_id=2, when=SLOTS[0]), say("Confirm?")])
     hold(graph, "s1")

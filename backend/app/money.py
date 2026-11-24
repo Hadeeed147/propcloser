@@ -14,8 +14,11 @@ NUMBERS = {"ek": 1, "one": 1, "do": 2, "two": 2, "teen": 3, "three": 3, "char": 
            "nine": 9, "das": 10, "ten": 10, "dedh": 1.5, "derh": 1.5, "dhai": 2.5, "dhaai": 2.5, "adhai": 2.5,
            "aadha": 0.5, "adha": 0.5, "half": 0.5}
 SHIFT = {"paune": -0.25, "pone": -0.25, "sawa": 0.25, "sarhe": 0.5, "saarhe": 0.5, "sadhe": 0.5}
-FILLER = {"pkr", "rs", "rupees", "rupay", "about", "around", "approx", "tak", "qareeb", "up", "to", "under", "max",
-          "budget", "and", "aur", "a", "month", "per", "only"}
+FILLER = set("pkr rs rupees rupay about around approx approximately roughly nearly tak qareeb lagbhag taqreeban up to upto under "
+             "below within less than not more max maximum min minimum total budget price rent monthly and aur a the my is of for "
+             "month mahina mahine per only hai mein se kam".split())
+URDU_SCRIPT = {"کروڑ": "crore", "لاکھ": "lakh", "ہزار": "hazar", "ڈیڑھ": "dedh", "ڈھائی": "dhai", "پونے": "paune", "سوا": "sawa",
+               "ساڑھے": "sarhe", "ایک": "ek", "دو": "do", "تین": "teen", "چار": "char", "پانچ": "panch", "آدھا": "aadha"}
 
 
 def _fail(value):
@@ -28,6 +31,8 @@ def parse_pkr(value) -> int:
     if isinstance(value, (int, float)):
         return int(value) if value >= 1000 else _fail(value)
     text = re.sub(r"(?<=\d),(?=\d)", "", str(value).lower())
+    for urdu, roman in URDU_SCRIPT.items():
+        text = text.replace(urdu, f" {roman} ")
     if re.search(r"\d\s*-\s*\d", text):                       # a range: "50-60 lakh"
         _fail(value)
     total, qty, shift, used_unit = 0.0, None, None, False

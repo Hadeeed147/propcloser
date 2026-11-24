@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import csv
 import re
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app import config
 
 PKT = timezone(timedelta(hours=5), "PKT")          # Pakistan has no DST
 SEED_CSV = Path(__file__).resolve().parent.parent / "seed" / "listings.csv"
@@ -32,6 +35,23 @@ def format_pkr(amount: int | float | None) -> str:
     if amount >= 100_000:
         return f"{amount / 100_000:.2f}".rstrip("0").rstrip(".") + " lakh"
     return f"{amount:,.0f}"
+
+
+def memory_items(profile: dict) -> list[str]:
+    """The lead's memory the way a person would say it (used in the prompt and in my_data)."""
+    out = []
+    for key, value in profile.items():
+        if key == "notes":                          # one line each: buried in a long line, the model overlooked them
+            out += [f"they said: {note}" for note in value]
+            continue
+        if key == "booked_visits":
+            value = "; ".join(value)
+        elif key == "budget_pkr":
+            key, value = "budget", f"PKR {format_pkr(value)}"
+        elif key == "purpose":
+            key, value = "wants to", "rent" if value == "rent" else "buy"
+        out.append(f"{key.replace('_', ' ')}: {value}")
+    return out
 
 
 def listing_line(listing: dict) -> str:
@@ -86,17 +106,21 @@ def search(listings: list[dict], purpose: str = "sale", area: str | None = None,
     """Return (rows, exact). If nothing matches exactly, return the 3 closest options instead."""
     pool = [x for x in listings if x["purpose"] == (purpose or "sale")]
 
-    def ok(x, use_area=True, use_price=True):
-        return ((not area or not use_area or match_area(area, x))
-                and (not property_type or x["property_type"] == property_type)
-                and (not min_beds or x["beds"] >= min_beds)
-                and (not max_price_pkr or not use_price or x["price_pkr"] <= max_price_pkr))
+    def ok(x, skip=()):
+        return (("area" in skip or not area or match_area(area, x))
+                and (x["property_type"] == property_type if property_type else not (min_beds and x["property_type"] == "plot"))
+                and ("beds" in skip or not min_beds or x["beds"] >= min_beds)
+                and ("price" in skip or not max_price_pkr or x["price_pkr"] <= max_price_pkr))
 
     exact = [x for x in pool if ok(x)]
     if exact:
         exact.sort(key=lambda x: -x["price_pkr"] if max_price_pkr else x["price_pkr"])   # best value under budget first
         return exact[:limit], True
-    near = [x for x in pool if ok(x, use_price=False)] or [x for x in pool if ok(x, use_area=False)] or pool
+    # Give up one wish at a time, the least important first. The kind of property is kept as long as possible.
+    near: list[dict] = []
+    for skip in (("price",), ("area",), ("beds",), ("area", "price"), ("beds", "price"), ("area", "beds"), ("area", "beds", "price")):
+        near = near or [x for x in pool if ok(x, skip)]
+    near = near or pool
     if max_price_pkr:
         near = sorted(near, key=lambda x: abs(x["price_pkr"] - max_price_pkr))
     return near[:3], False
@@ -148,7 +172,8 @@ class MemoryRepo:
         return next((x for x in self.listings if x["id"] == listing_id), None)
 
     async def booked_slots(self, listing_id: int) -> set[datetime]:
-        return {v["slot_time"] for v in self.visits if v["listing_id"] == listing_id and v["status"] == "confirmed"}
+        taken = Counter(v["slot_time"] for v in self.visits if v["listing_id"] == listing_id and v["status"] == "confirmed")
+        return {slot for slot, n in taken.items() if n >= config.SLOT_CAPACITY}
 
     async def create_visit(self, user_id: str, listing_id: int, slot_time: datetime) -> dict:
         visit = {"id": len(self.visits) + 1, "user_id": user_id, "listing_id": listing_id, "slot_time": slot_time,
@@ -292,8 +317,8 @@ class PostgresRepo:
         return next((x for x in await self.all_listings() if x["id"] == listing_id), None)
 
     async def booked_slots(self, listing_id: int) -> set[datetime]:
-        rows = await self._all("select slot_time from visits where listing_id = %s and status = 'confirmed'",
-                               (listing_id,))
+        rows = await self._all("select slot_time from visits where listing_id = %s and status = 'confirmed' "
+                               "group by slot_time having count(*) >= %s", (listing_id, config.SLOT_CAPACITY))
         return {r["slot_time"] for r in rows}
 
     async def create_visit(self, user_id: str, listing_id: int, slot_time: datetime) -> dict:
@@ -303,18 +328,25 @@ class PostgresRepo:
 
     async def confirm_visit(self, user_id: str, visit_id: int, replaces: int | None = None) -> dict | None:
         """Confirm, and for a reschedule cancel the old visit, in ONE transaction: both happen or neither does."""
-        from psycopg import errors
-        try:
-            async with self.pool.connection() as conn, conn.transaction():
-                cur = await conn.execute("update visits set status = 'confirmed' where id = %s and user_id = %s "
-                                         "and status = 'pending' returning *", (visit_id, user_id))
-                visit = await cur.fetchone()
-                if visit and replaces:
-                    await conn.execute("update visits set status = 'cancelled' where id = %s and user_id = %s",
-                                       (replaces, user_id))
-                return visit
-        except errors.UniqueViolation:      # someone else confirmed that slot first
-            return None
+        async with self.pool.connection() as conn, conn.transaction():
+            cur = await conn.execute("select * from visits where id = %s and user_id = %s and status = 'pending'",
+                                     (visit_id, user_id))
+            visit = await cur.fetchone()
+            if not visit:
+                return None
+            # One confirmation at a time per listing, so two leads can never take the last place together.
+            await conn.execute("select pg_advisory_xact_lock(7001, %s)", (visit["listing_id"],))
+            cur = await conn.execute("select count(*) as n from visits where listing_id = %s and slot_time = %s "
+                                     "and status = 'confirmed'", (visit["listing_id"], visit["slot_time"]))
+            if (await cur.fetchone())["n"] >= config.SLOT_CAPACITY:
+                return None
+            cur = await conn.execute("update visits set status = 'confirmed' where id = %s and status = 'pending' returning *",
+                                     (visit_id,))
+            visit = await cur.fetchone()
+            if visit and replaces:
+                await conn.execute("update visits set status = 'cancelled' where id = %s and user_id = %s",
+                                   (replaces, user_id))
+            return visit
 
     async def cancel_visit(self, user_id: str, visit_id: int, only_pending: bool = False) -> dict | None:
         allowed = ["pending"] if only_pending else ["pending", "confirmed"]

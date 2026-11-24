@@ -13,6 +13,7 @@ Only `closer` calls the model, at most MAX_MODEL_CALLS times per turn. Everythin
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Literal, TypedDict
 from uuid import uuid4
 
@@ -32,7 +33,7 @@ from app.guard import check_message, refusal_for
 from app.prompts import request_messages
 from app.replies import reply_for
 from app.repo import get_repo, lead_status
-from app.tools import RISKY_TOOLS, TOOL_SPECS, TOOLS, full_memory, tool_error, visit_label
+from app.tools import RISKY_TOOLS, TOOL_SPECS, TOOLS, full_memory, pick_visit, tool_error, visit_label
 
 log = logging.getLogger("propcloser")
 NOT_EXECUTED = "Not executed"
@@ -89,6 +90,17 @@ def model_calls_this_turn(messages: list[AnyMessage]) -> int:
 
 def last_human_text(messages: list[AnyMessage]) -> str:
     return next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+
+
+ASKED_ABOUT = {"cancel_visit": r"cancel", "forget_me": r"delete|forget|erase|remove"}
+
+
+def model_already_asked(messages: list[AnyMessage], tool: str) -> bool:
+    """The agent itself just asked "shall I cancel it?" and the lead answered exactly yes: do not ask a second time."""
+    i = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)), 0)
+    asked = messages[i - 1].text if i and isinstance(messages[i - 1], AIMessage) else ""
+    return (tool in ASKED_ABOUT and "?" in asked and bool(re.search(ASKED_ABOUT[tool], asked, re.I))
+            and is_exact_yes(messages[i].text))
 
 
 def waiting_since_earlier(state: State) -> dict | None:
@@ -157,8 +169,11 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
         pending = waiting_since_earlier(state)
 
         def approved(call) -> bool:
-            return bool(pending and pending["tool"] == call["name"] and pending["args"] == call["args"]
-                        and is_yes(last_human_text(messages), call["name"]))
+            if model_already_asked(messages, call["name"]):
+                return True
+            same = pending and pending["tool"] == call["name"] and (
+                pending["args"] == call["args"] or not any(call["args"].values()))
+            return bool(same and is_yes(last_human_text(messages), call["name"]))
 
         risky = [c for c in last.tool_calls if c["name"] in RISKY_TOOLS]
         if all(approved(c) for c in risky):
@@ -187,13 +202,13 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
                    else "Which property and time would you like to visit? I'll check the free slots first.")
         else:
             if call["name"] == "cancel_visit":
-                visit = await get_repo().get_visit(runtime.context.user_id, call["args"].get("visit_id", 0))
-                if not visit or visit["status"] == "cancelled":
-                    return Command(goto="tools")                 # harmless: the tool answers "no such visit"
-                summary = f"cancel your visit to {visit_label(visit)}"
+                visit, _ = await pick_visit(runtime.context.user_id, call["args"].get("visit_id"), ("pending", "confirmed"))
+                if not visit:
+                    return Command(goto="tools")                 # harmless: the tool says which visits exist
+                summary, args = f"cancel your visit to {visit_label(visit)}", {"visit_id": visit["id"]}
             else:
-                summary = "delete everything I remember about you"
-            update["pending_action"] = {"tool": call["name"], "args": call["args"], "summary": summary,
+                summary, args = "delete everything I remember about you", {}
+            update["pending_action"] = {"tool": call["name"], "args": args, "summary": summary,
                                         "human_turn": human_turns(messages)}
             ask = f"Just to confirm: shall I {summary}? Reply \"yes\" (haan) to confirm."
         skipped = [ToolMessage(f"{NOT_EXECUTED}: waiting for the lead to confirm.", tool_call_id=c["id"])

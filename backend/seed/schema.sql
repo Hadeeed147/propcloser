@@ -39,9 +39,9 @@ create table if not exists visits (
   created_at  timestamptz not null default now()
 );
 
--- one confirmed visit per listing per slot (stops double booking)
-create unique index if not exists visits_one_confirmed_per_slot
-  on visits (listing_id, slot_time) where status = 'confirmed';
+-- capacity per slot is enforced in repo.confirm_visit (advisory lock + count)
+drop index if exists visits_one_confirmed_per_slot;
+create index if not exists visits_slot_idx on visits (listing_id, slot_time) where status = 'confirmed';
 create index if not exists visits_user_idx on visits (user_id);
 
 create table if not exists followups (

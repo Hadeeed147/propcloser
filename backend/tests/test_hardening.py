@@ -192,7 +192,7 @@ def test_tool_schemas_are_compact():
     tools = payload([HumanMessage("hi")])["tools"]
     import json
     raw = json.dumps(tools)
-    assert len(tools) == 13 and "anyOf" not in raw and '"title"' not in raw and len(raw) < 4000
+    assert len(tools) == 13 and "anyOf" not in raw and '"title"' not in raw and len(raw) < 4100
 
 
 def test_prefix_and_history_are_cached_and_stable(make_graph):

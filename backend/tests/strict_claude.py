@@ -25,6 +25,10 @@ def problems(r):
     if r.get("thinking") != {"type": "disabled"}:
         out.append(f"thinking {r.get('thinking')}")
     msgs = r["messages"]
+    if [i for i, m in enumerate(msgs) if m["role"] == "system"] not in ([], [len(msgs) - 1]):
+        out.append("a system message is only allowed last, right after a user message")
+    if msgs[-1]["role"] == "system":
+        msgs = msgs[:-1]
     if msgs[0]["role"] != "user" or msgs[-1]["role"] != "user":
         out.append("conversation must start and end with the user")
     if any(a["role"] == b["role"] for a, b in zip(msgs, msgs[1:])):
@@ -125,12 +129,12 @@ def text(words):
 
 def brain(r):
     """A crude model: tool calls for known phrases, otherwise words. Realistic reply length for costs."""
-    last = blocks_of(r["messages"][-1])
+    memory = r["messages"][-1]["content"] if r["messages"][-1]["role"] == "system" else ""
+    last = blocks_of(next(m for m in reversed(r["messages"]) if m["role"] == "user"))
     if any(b["type"] == "tool_result" for b in last):
         results = " ".join(c["text"] for b in last if b["type"] == "tool_result" for c in b["content"])
         return [text("Here is what I found: " + results[:220])]
     said = last[0]["text"].lower()
-    memory = last[-1]["text"]
     if "dedh crore" in said:
         return [text("Noting that."), tool("save_lead_profile", budget_pkr="dedh crore", area="B-17"),
                 tool("save_lead_profile", beds=3, note="needs parking, call 0300-1234567"),

@@ -21,6 +21,9 @@ MODEL_RETRIES = int(os.getenv("MODEL_RETRIES", "1"))
 REQUEST_TIMEOUT_S = float(os.getenv("REQUEST_TIMEOUT_S", "45"))
 MAX_CONCURRENT_TURNS = int(os.getenv("MAX_CONCURRENT_TURNS", "8"))
 
+# Agents available per listing per visit time. With 1, test users would block each other's bookings.
+SLOT_CAPACITY = int(os.getenv("SLOT_CAPACITY", "4"))
+
 # Money (app/budget.py). The key stops at $2; keep a margin for calls made outside this server.
 MAX_SPEND_USD = float(os.getenv("MAX_SPEND_USD", "1.80"))
 MAX_USD_PER_HOUR = float(os.getenv("MAX_USD_PER_HOUR", "0.40"))

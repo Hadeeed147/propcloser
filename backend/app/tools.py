@@ -15,14 +15,14 @@ from typing import Annotated, Literal, Optional
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
-from pydantic import BeforeValidator
+from pydantic import BeforeValidator, Field, WithJsonSchema
 
 from app.context import Ctx
 from app.guard import check_message
 from app.ids import memory_namespace
 from app.money import parse_pkr
 from app.privacy import redact
-from app.repo import PKT, format_pkr, get_repo, listing_line, now_pkt, search, slot_label, upcoming_slots
+from app.repo import PKT, format_pkr, get_repo, listing_line, memory_items, now_pkt, search, slot_label, upcoming_slots
 from app.when import parse_when
 
 log = logging.getLogger("propcloser")
@@ -31,8 +31,11 @@ RISKY_TOOLS = {"confirm_visit", "cancel_visit", "forget_me"}      # must pass th
 MAX_NOTES = 8
 LIMITS = {"name": 60, "area": 60, "timeline": 80, "financing": 80, "note": 160}      # memory is paid on every call
 
-# The model sees a plain integer; people's words ("dedh crore") are still understood if it passes them through.
-Pkr = Annotated[int, BeforeValidator(parse_pkr)]
+# The model is asked for the lead's WORDS and app/money.py does the arithmetic. (Asked for an integer, the real model
+# turned "paune do crore" into 20000000 by itself before our parser ever saw it.)
+Pkr = Annotated[int, BeforeValidator(parse_pkr), WithJsonSchema(
+    {"type": "string", "description": "amount in the lead's own words, e.g. 'paune do crore', '80 lakh', '85k'"})]
+Timeline = Annotated[str, Field(description="when they plan to buy or move; never a visit time")]
 
 _profile_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
@@ -89,11 +92,12 @@ async def full_memory(store, user_id: str) -> dict:
 async def search_listings(purpose: Literal["sale", "rent"] = "sale", area: Optional[str] = None,
                           property_type: Optional[Literal["house", "flat", "plot"]] = None,
                           min_beds: Optional[int] = None, max_price_pkr: Optional[Pkr] = None) -> str:
-    """Search the agency's Islamabad listings. max_price_pkr in full rupees (1 crore = 10000000); monthly if rent."""
+    """Search the agency's Islamabad listings. max_price_pkr is the monthly rent when purpose is rent."""
     rows, exact = search(await get_repo().all_listings(), purpose, area, property_type, min_beds, max_price_pkr)
     if not rows:
         return "No listings found."
-    head = "Matching listings:" if exact else "No exact match. Closest options:"
+    limit = f" up to PKR {format_pkr(max_price_pkr)}" if max_price_pkr else ""
+    head = f"Matching listings{limit}:" if exact else f"No exact match{limit}. Closest options:"
     return head + "\n" + "\n".join(listing_line(r) for r in rows)
 
 
@@ -139,10 +143,10 @@ def done(runtime, key: str, what: str, text: str) -> Command:
 async def save_lead_profile(runtime: ToolRuntime[Ctx], name: Optional[str] = None, budget_pkr: Optional[Pkr] = None,
                             area: Optional[str] = None, purpose: Optional[Literal["sale", "rent"]] = None,
                             property_type: Optional[Literal["house", "flat", "plot"]] = None,
-                            beds: Optional[int] = None, timeline: Optional[str] = None,
+                            beds: Optional[int] = None, timeline: Optional[Timeline] = None,
                             financing: Optional[str] = None, note: Optional[str] = None) -> str:
-    """Save facts the lead said about themselves. note: one other lasting fact, e.g. 'needs parking for 2 cars'.
-    Never phone numbers, CNIC or payment details."""
+    """Save facts the lead said about themselves. note: any other lasting facts, separated by semicolons, e.g.
+    'has two dogs; needs parking'. Never phone numbers, CNIC or payment details."""
     given = {"name": name, "budget_pkr": budget_pkr, "area": area, "purpose": purpose,
              "property_type": property_type, "beds": beds, "timeline": timeline, "financing": financing}
     fields = {k: clean_fact(k, v) if k in LIMITS else v for k, v in given.items() if v not in (None, "")}
@@ -151,19 +155,19 @@ async def save_lead_profile(runtime: ToolRuntime[Ctx], name: Optional[str] = Non
     user_id = runtime.context.user_id
     async with profile_lock(user_id):
         profile = {**await read_profile(runtime.store, user_id), **fields}
-        if note:
-            profile["notes"] = ([n for n in profile.get("notes", []) if n != note] + [note])[-MAX_NOTES:]
+        for part in filter(None, (p.strip(" .") for p in note.split(";"))):
+            profile["notes"] = ([n for n in profile.get("notes", []) if n.lower() != part.lower()] + [part])[-MAX_NOTES:]
         await runtime.store.aput(memory_namespace(user_id), PROFILE_KEY, profile)
         await get_repo().upsert_lead(user_id, fields)
-    return "Saved " + (", ".join([*fields, *(["note"] if note else [])]) or "nothing new") + "."
+    said = memory_items({**fields, **({"notes": [note]} if note else {})})
+    return "Saved. " + "; ".join(said) if said else "Nothing new to save."
 
 
 @tool
 async def my_data(runtime: ToolRuntime[Ctx]) -> str:
     """Everything remembered about this lead, when they ask what you know about them."""
     memory = await full_memory(runtime.store, runtime.context.user_id)
-    return "\n".join(f"- {k.replace('_', ' ')}: {'; '.join(v) if isinstance(v, list) else v}"
-                     for k, v in memory.items()) or "Nothing is saved about this lead."
+    return "\n".join(f"- {item}" for item in memory_items(memory)) or "Nothing is saved about this lead."
 
 
 @tool
@@ -180,6 +184,17 @@ async def forget_me(runtime: ToolRuntime[Ctx]) -> Command:
 
 def human_turn(runtime) -> int:
     return sum(isinstance(m, HumanMessage) for m in (runtime.state or {}).get("messages", []))
+
+
+async def pick_visit(user_id: str, visit_id: int | None, statuses: tuple[str, ...]) -> tuple[dict | None, str]:
+    """The visit meant: by id, or the only one there is. Otherwise (None, what to tell the model)."""
+    mine = [v for v in await get_repo().user_visits(user_id) if v["status"] in statuses and v["slot_time"] > now_pkt()]
+    if visit_id:
+        return next(((v, "") for v in mine if v["id"] == visit_id), (None, f"This lead has no active visit #{visit_id}."))
+    if len(mine) == 1:
+        return mine[0], ""
+    return None, "Ask which visit they mean: " + "; ".join(f"Visit #{v['id']}: {visit_label(v)}" for v in mine) if mine \
+        else "This lead has no upcoming visit."
 
 
 async def _hold(runtime, listing: dict, said: str, replaces: dict | None = None) -> Command | str:
@@ -212,12 +227,17 @@ async def request_visit(listing_id: int, runtime: ToolRuntime[Ctx], when: str = 
 
 
 @tool
-async def reschedule_visit(visit_id: int, when: str, runtime: ToolRuntime[Ctx]) -> Command | str:
-    """Hold a new time for a booked visit, then ask the lead to confirm. The old time is kept until they say yes."""
-    repo = get_repo()
-    visit = await repo.get_visit(runtime.context.user_id, visit_id)
-    if not visit or visit["status"] != "confirmed":
-        return f"This lead has no booked visit #{visit_id}. Call my_visits."
+async def reschedule_visit(when: str, runtime: ToolRuntime[Ctx], visit_id: Optional[int] = None) -> Command | str:
+    """Change the time of a held or booked visit, then ask the lead to confirm. visit_id only if they have several."""
+    repo, user_id = get_repo(), runtime.context.user_id
+    waiting = (runtime.state or {}).get("pending_action") or {}
+    if waiting.get("visit_id") and visit_id in (None, 0, waiting["visit_id"]):       # still only held: hold another time
+        held = await repo.get_visit(user_id, waiting["visit_id"])
+        old = await repo.get_visit(user_id, waiting["replaces"]) if waiting.get("replaces") else None
+        return await _hold(runtime, await repo.get_listing(held["listing_id"]), when, replaces=old)
+    visit, problem = await pick_visit(user_id, visit_id, ("confirmed",))
+    if not visit:
+        return problem
     return await _hold(runtime, await repo.get_listing(visit["listing_id"]), when, replaces=visit)
 
 
@@ -238,12 +258,12 @@ async def confirm_visit(runtime: ToolRuntime[Ctx]) -> Command | str:
 
 
 @tool
-async def cancel_visit(visit_id: int, runtime: ToolRuntime[Ctx]) -> Command | str:
-    """Cancel one of the lead's visits. The lead is asked to confirm first."""
+async def cancel_visit(runtime: ToolRuntime[Ctx], visit_id: Optional[int] = None) -> Command | str:
+    """Cancel a visit; the system asks the lead to confirm. visit_id only if they have several."""
     repo, user_id = get_repo(), runtime.context.user_id
-    if not await repo.cancel_visit(user_id, visit_id):
-        return done(runtime, "gone", "", f"This lead has no active visit #{visit_id}. Call my_visits.")
-    visit = await repo.get_visit(user_id, visit_id)
+    visit, problem = await pick_visit(user_id, visit_id, ("pending", "confirmed"))
+    if not visit or not await repo.cancel_visit(user_id, visit["id"]):
+        return done(runtime, "gone", "", problem or "Nothing was cancelled.")
     return done(runtime, "cancelled", visit_label(visit), f"Cancelled: {visit_label(visit)}.")
 
 

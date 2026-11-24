@@ -87,7 +87,7 @@ def test_forget_me_erases_profile_and_every_chat(boot):
         assert "new lead" in app.say(user, "3", "my budget?")["reply"]
 
 
-def test_two_leads_cannot_confirm_the_same_slot(boot):
+def test_a_slot_is_never_overbooked_even_in_a_race(boot):
     from datetime import timedelta
 
     from app.repo import get_repo, now_pkt
@@ -95,9 +95,9 @@ def test_two_leads_cannot_confirm_the_same_slot(boot):
     with boot() as app:
         async def race():
             repo = get_repo()
-            visits = [await repo.create_visit(f"racer{i}", 1, when) for i in range(6)]
+            visits = [await repo.create_visit(f"racer{i}", 1, when) for i in range(12)]
             return await asyncio.gather(*[repo.confirm_visit(v["user_id"], v["id"]) for v in visits])
-        assert sum(bool(r) for r in app.client.portal.call(race)) == 1
+        assert sum(bool(r) for r in app.client.portal.call(race)) == config.SLOT_CAPACITY
 
 
 def test_reschedule_is_one_transaction(boot):
