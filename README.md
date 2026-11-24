@@ -11,8 +11,8 @@ across conversations. The agency watches its pipeline and approves follow-ups on
 |---|---|
 | Website (customer page and `/admin` dashboard) | https://propcloser.vercel.app |
 | Agent API | https://propcloser-api.onrender.com (`/health`, `/chat`, `/docs`) |
-| Demo video (2–3 min) | `<YouTube unlisted / Drive link>` |
-| Paper canvas photo | `<Drive link>` |
+| Demo video (2–3 min) | https://drive.google.com/file/d/1lsMzgFMPxJCB8Jq7ajnZYVBtL80RASUa/view?usp=sharing |
+| Paper canvas photo | https://drive.google.com/file/d/1nxuIDb4oqABs-baoEcRxuDxyBj3oEOPP/view?usp=sharing |
 
 ![Demo](docs/demo.gif)
 <!-- TODO: record the demo flow as a GIF and save it as docs/demo.gif -->
