@@ -19,11 +19,11 @@
 ## 0. Status (update as you go)
 
 **Done (scaffold, tested locally):**
-- [x] Backend: FastAPI `/chat` + `/health`, LangGraph graph (8 nodes), 13 tools, guard, approval gate, error repair
+- [x] Backend: FastAPI `/chat` + `/health`, LangGraph graph (9 nodes), 13 tools, guard, approval gate, error repair
 - [x] Neon Postgres support (checkpointer + Store + tables auto-created and seeded) with in-memory fallback for dev
 - [x] 30 Islamabad listings (`backend/seed/listings.csv`), schema
 - [x] Website: customer page with listings + chat, admin dashboard (pipeline, visits, follow-up approvals)
-- [x] 132 unit tests (no API key needed), `tests.json` (10 cases) + `attacks.json` (5 attacks), benchmark runner
+- [x] 199 tests (no API key needed) + 4 on real Postgres in CI; image built and booted in CI, `tests.json` (10 cases) + `attacks.json` (5 attacks), benchmark runner
 - [x] Dockerfile for HF Spaces, `render.yaml`, CI + keep-alive workflows, README, `docs/DEPLOY.md`
 
 **Left to do today:**
@@ -86,6 +86,8 @@ flowchart TD
     guard -->|ok| load[load_profile<br/>Store by user_id]
     load -->|exact yes to what we just asked| fast[confirm_fast<br/>writes the approved call]
     fast --> tools[tools<br/>ToolNode]
+    load -->|confirmed action ran| done[say_done<br/>fixed reply, 0 tokens]
+    done --> pipe
     load --> closer[closer<br/>Haiku 5.5 + 13 tools]
     closer -->|only safe calls| tools
     tools --> load
@@ -104,7 +106,7 @@ Contract for everyone else: `docs/HANDOFF.md`.
 | Turn | Lead says | Path | Result |
 |---|---|---|---|
 | 1 | "book the B-17 house Wednesday 5pm" | guard → load_profile → closer → tools (`request_visit`) → … → closer | Slot **held**, agent asks "shall I book…?" |
-| 2 | "haan ji" | guard → load_profile → **confirm_fast** → tools (`confirm_visit`) → closer | Booked, one model call |
+| 2 | "haan ji" | guard → load_profile → **confirm_fast** → tools (`confirm_visit`) → load_profile → **say_done** | Booked, 0 tokens |
 | 2′ | "ok show me cheaper ones" | guard → load_profile → closer | Not an exact yes: nothing is booked |
 | 2″ | later, "yes" to some other question | closer | Only the message right after our question can trigger confirm_fast |
 
@@ -124,7 +126,7 @@ Rules:
 - Open, no login. Never return 500 — catch everything and return a polite `reply` with `tool_calls: []`.
 - `tokens` = sum of `usage_metadata.input_tokens` / `output_tokens` over **every** AI message created in this turn.
 - `tool_calls` = every tool the graph ran this turn, as `{name, args}` in order.
-- Checkpointer thread key = **`f"{user_id}:{thread_id}"`** so two users sending the same `thread_id` never share a chat.
+- Checkpointer thread key = **`ids.thread_key(user_id, thread_id)`** (both parts encoded) so two users sending the same `thread_id` never share a chat.
 - Timeout the model at ~25 s; one retry; then fall back to a short apology.
 
 Extra endpoints for the website (not graded): `GET /listings`, `GET /admin/leads`,
@@ -141,12 +143,12 @@ All tools take `user_id` from the run config, **never** from model arguments.
 |---|---|---|---|
 | `search_listings` | `area?`, `purpose` (sale/rent), `type?` (house/flat/plot), `min_beds?`, `max_price_pkr?` | Up to 5 listings `{id, title, area, beds, baths, size_marla, price_pkr}`; if none match, the 3 closest with a note | Safe |
 | `get_listing` | `listing_id` | Full listing details | Safe |
-| `check_slots` | `listing_id` | Next free slots (11 AM / 3 PM / 5 PM PKT, next 7 days) as `slot id (label)` | Safe |
+| `check_slots` | `listing_id` | Free times (11:00 / 15:00 / 17:00 PKT, next 7 days) | Safe |
 | `calculate_installment` | `price_pkr`, `down_payment_pct=20`, `years=10`, `annual_rate_pct=12` | Monthly installment in PKR | Safe |
 | `save_lead_profile` | any of `name, budget_pkr, area, purpose, property_type, beds, timeline, financing` | Merged profile (Store + `leads` table) | Safe |
-| `request_visit` | `listing_id`, `slot` (slot id, e.g. `2026-11-28T15:00`) | Creates a **pending** visit, sets `pending_action`, tells the agent to ask for confirmation | Safe |
+| `request_visit` | `listing_id`, `when` in plain words ("earliest", "saturday 3pm") | Creates a **pending** visit, sets `pending_action`, tells the agent to ask for confirmation | Safe |
 | `confirm_visit` | — | Books the pending visit (unique index stops double booking) | **Risky → approval gate** |
-| `reschedule_visit` | `visit_id`, `slot` | Holds the new slot; old visit kept until yes | Safe |
+| `reschedule_visit` | `visit_id`, `when` | Holds the new slot; old visit kept until yes | Safe |
 | `cancel_visit` | `visit_id` | Cancels the lead's own visit | **Risky → approval gate** |
 | `my_data` | — | What is remembered about this lead | Safe |
 | `forget_me` | — | Deletes the lead's saved memory | **Risky → approval gate** |
@@ -293,7 +295,7 @@ Cut order if late: follow-ups → installment calculator → dashboard polish. N
 - [ ] API and site stay live until Wednesday
 
 ### Form answers (copy into the submission form)
-- **Nodes:** guard (rules-based safety), refuse, load_profile (long-term memory read), closer (Claude Haiku agent with tools), tools, approval_gate (asks the lead before booking, cancelling or deleting), confirm_fast (acts on an exact yes), update_pipeline (moves the lead's CRM status).
+- **Nodes:** guard (rules-based safety), refuse, load_profile (long-term memory read), closer (Claude Haiku agent with tools), tools, approval_gate (asks the lead before booking, cancelling or deleting), confirm_fast (acts on an exact yes), say_done (fixed reply), update_pipeline (moves the lead's CRM status).
 - **Tools:** search_listings, get_listing, check_slots, calculate_installment, save_lead_profile, request_visit, reschedule_visit, confirm_visit, cancel_visit, my_visits, my_data, forget_me, schedule_followup.
 - **Memory:** short-term = Postgres checkpointer per `user_id:thread_id`; long-term = Postgres Store namespace `("leads", user_id)` holding budget, area, purpose, type, beds, timeline.
 - **Safety:** refuses off-topic and prompt injection in a guard node; never reveals other users' data; booking, cancelling and deleting need an explicit "yes" in a later message; follow-up messages need agency approval.

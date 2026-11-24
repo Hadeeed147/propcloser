@@ -66,4 +66,4 @@ def test_typical_conversation_stays_inside_its_cost_budget(world):
     total = cached + sum(u["input_tokens"] + u["cache_creation_input_tokens"] for u in world.claude.usage)
     print(f"\n6-turn lead: ${usd:.6f}, {used} model calls, cache hit rate {cached / total:.0%}, "
           f"leads per $2: {2 / usd:,.0f}")
-    assert used <= 7 and usd < 0.0010 and cached / total > 0.6
+    assert used <= 7 and usd < 0.0008 and cached / total > 0.7

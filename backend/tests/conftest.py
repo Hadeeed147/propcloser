@@ -10,7 +10,10 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import Field
 
 from app.graph import build_graph
+from app import config
 from app.repo import MemoryRepo, set_repo
+
+config.DATABASE_URL = ""          # unit tests never touch a real database, even if .env has one
 
 _ids = itertools.count(1)
 USAGE = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}

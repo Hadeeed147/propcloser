@@ -15,7 +15,5 @@ services:
         sync: false
       - key: ADMIN_TOKEN
         sync: false
-      - key: MODEL
-        value: claude-haiku-5-5
       - key: PORT
         value: "7860"

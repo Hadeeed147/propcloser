@@ -99,6 +99,17 @@
 - [ ] **Step 1: Failing tests:** an idle qualified lead gets one draft naming their area, budget and a real matching listing; a second sweep drafts nothing; a lead with a confirmed visit or recent activity is skipped; a lead gets at most 3 drafts, spaced 1, 3 and 7 days; a lead with no area and no budget is skipped.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS. **Step 5:** Commit.
 
+### Task 7b: Architecture audit (added after review; every item has a test in `tests/test_hardening.py`)
+
+- [x] Any `user_id` works (e-mails broke LangGraph namespaces); ids can never collide; numeric / missing / NUL input accepted
+- [x] Guard narrowed: refused 12 of 13 genuine buyer messages before; blocked text never reaches the model later
+- [x] `forget_me` erases profile, chats and unsent follow-ups; saved facts are short and never instructions
+- [x] At most 5 model calls per turn; cut-off tool calls are not run; tool errors never leak internals
+- [x] One checkpoint write per turn; database connections re-validated; `/ready`; reschedule is one transaction
+- [x] Admin API closed when deployed with a weak token; dollar caps per hour and in total
+- [x] Costs: cached prefix and history, compact schemas, plain-word times, 0-token confirmations (`docs/COSTS.md`)
+- [x] Real-Postgres tests across a restart and an image boot test in CI
+
 ### Task 8: Handoff
 
 **Files:** Modify `README.md`, `PLAN.md`, `tests.json`, `.env.example`, `docs/DEPLOY.md`. Create `docs/HANDOFF.md`.

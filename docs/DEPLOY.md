@@ -4,7 +4,9 @@ Order matters: **database → API → website → keep-alive**. Never put keys i
 
 ## 1. Neon Postgres (long-term memory + data)
 
-1. Sign up at neon.tech → **New project** (region: closest to Asia, e.g. Singapore).
+1. Sign up at neon.tech → **New project**. Pick the region **closest to the API, not to you**: every turn makes several
+   database round trips, and across oceans each one costs about 0.25 s. Hugging Face Spaces run in the US, so choose
+   **AWS US East (N. Virginia)**. On Render, pick the same region on both sides.
 2. **Connection details** → untick *Connection pooling* → copy the **direct** connection string
    (`postgresql://…neon.tech/neondb?sslmode=require`).
 3. That's it — the API creates every table and seeds the 30 listings on first start.
@@ -18,7 +20,7 @@ Order matters: **database → API → website → keep-alive**. Never put keys i
 2. Space **Settings → Variables and secrets** → add **secrets**:
    - `ANTHROPIC_API_KEY` — your group key
    - `DATABASE_URL` — the Neon direct URL
-   - `ADMIN_TOKEN` — any long random string (the dashboard password)
+   - `ADMIN_TOKEN` — random, 12+ characters (the dashboard password). Weak or missing = the admin API stays closed
 3. Push the `backend/` folder to the Space (from the repo root):
 
    ```bash
@@ -27,7 +29,8 @@ Order matters: **database → API → website → keep-alive**. Never put keys i
    ```
    When asked for a password, use a Hugging Face **access token** with write permission
    (Settings → Access Tokens).
-4. Wait for the build (Logs tab). Check: `https://<hf-username>-propcloser-api.hf.space/health` → `ok`.
+4. Wait for the build (Logs tab). Check `/health` → `ok`, then **`/ready`** → `{"ready": true, "storage": "postgres"}`.
+   If `ready` is false, `problems` says exactly what is missing (key, database, spend cap).
 5. Smoke test:
 
    ```bash
@@ -53,7 +56,7 @@ Render's free tier sleeps after ~15 minutes, so turn on the keep-alive below.
 ## 4. Keep it alive until Wednesday
 
 GitHub repo → **Settings → Secrets and variables → Actions → Variables** → add `API_URL` =
-your Space URL. The `keep-alive` workflow then pings `/health` every 10 minutes.
+your Space URL. The `keep-alive` workflow then pings `/health` and `/ready` every 10 minutes (keeps Neon awake too).
 Run it once by hand from the **Actions** tab to check it works.
 
 ## 5. Before submitting
@@ -64,5 +67,6 @@ python tests/run_bench.py --url https://<hf-username>-propcloser-api.hf.space
 ```
 Paste the table from `benchmark_results.md` into the README's **Benchmark** section.
 
-Cost check: each `/chat` call is usually one Haiku call (two or three when tools run), capped at 700
-output tokens; guard refusals cost 0 tokens. Watch usage in the Anthropic console — the key stops at $2.
+Before the first deploy run `python check_model.py` locally: it proves the key, the tools and the **prompt cache** work.
+
+Cost check: `GET /admin/usage` shows dollars spent, cache hit rate and the caps. Details: `docs/COSTS.md`.

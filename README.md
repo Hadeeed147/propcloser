@@ -49,6 +49,8 @@ flowchart TD
     guard -->|ok| load[load_profile<br/>Store by user_id]
     load -->|exact yes to what we just asked| fast[confirm_fast<br/>writes the approved call]
     fast --> tools[tools<br/>ToolNode]
+    load -->|confirmed action ran| done[say_done<br/>fixed reply, 0 tokens]
+    done --> pipe
     load --> closer[closer<br/>Haiku 5.5 + 13 tools]
     closer -->|only safe calls| tools
     tools --> load
@@ -67,7 +69,8 @@ flowchart TD
 | `closer` | **Yes** | The sales agent. The only node that calls the model. |
 | `tools` | No | LangGraph `ToolNode`; tools take `user_id` from the run context, never from the model. |
 | `approval_gate` | No | Human-in-the-loop for `confirm_visit`, `cancel_visit` and `forget_me`: runs only after a yes in a **later** message. No `interrupt()`, so an API client can never get stuck. |
-| `confirm_fast` | No | If the lead answers our question with an exact "yes" / "haan ji", it writes the approved tool call itself: one model call instead of two, and the model cannot forget to act. |
+| `confirm_fast` | No | If the lead answers our question with an exact "yes" / "haan ji", it writes the approved tool call itself, so the model cannot forget to act. |
+| `say_done` | No | Answers a confirmed action from a template in the lead's language (English / Roman Urdu). **The whole turn costs 0 tokens.** |
 | `update_pipeline` | No | Moves the lead new → qualified → visit booked for the dashboard. |
 
 ### What makes it different
@@ -76,6 +79,10 @@ flowchart TD
   (`app/money.py`), so no zeros get lost. An unclear amount ("2", "1 to 2 crore") is asked about, never guessed.
 - **Follows up for days at zero token cost.** `POST /admin/sweep` finds leads who went quiet and drafts a personal
   message from their memory plus a real matching listing, at most 3 times (1, 3 and 7 days). A human approves each one.
+- **Understands times.** "saturday 3pm", "kal 3 baje", "jumma shaam", "earliest" become a real free slot in code
+  (`app/when.py`): one tool call instead of three, and no calendar arithmetic by the model.
+- **Cheap by design.** About $0.0005 per six-turn lead, over 90% of input from cache, and a spend guard that keeps the
+  open endpoint from burning the key ([docs/COSTS.md](docs/COSTS.md)).
 - **Fails loudly.** A failed model call is logged with its cause and counted as a fail by our benchmark.
 
 ### Tools
@@ -84,12 +91,12 @@ flowchart TD
 |---|---|---|
 | `search_listings` | Filters the 30 listings by purpose, area, type, beds, budget; closest options if nothing matches | safe |
 | `get_listing` | Full details of one listing | safe |
-| `check_slots` | Free visit slots for the next 7 days | safe |
+| `check_slots` | Free visit times for the next 7 days | safe |
 | `calculate_installment` | Monthly installment (amortisation formula) | safe |
 | `save_lead_profile` | Saves budget, area, beds, timeline… and free-text notes; phone, CNIC, card and email are removed first | safe |
 | `my_data` | Shows the lead what is remembered about them | safe |
-| `forget_me` | Deletes the lead's saved memory | **approval** |
-| `request_visit` | Holds a slot (not booked yet) | safe |
+| `forget_me` | Deletes the lead's memory, chats and unsent follow-ups | **approval** |
+| `request_visit` | Holds a time given in plain words (not booked yet) | safe |
 | `reschedule_visit` | Holds a new slot; the old visit is kept until the lead says yes | safe |
 | `confirm_visit` | Books the held slot | **approval** |
 | `cancel_visit` | Cancels one of the lead's own visits | **approval** |
@@ -120,7 +127,10 @@ another lead's data. Admin endpoints need the `X-Admin-Token` header.
 | Off-topic requests | `guard` rules for obvious cases; the closer prompt refuses the rest in one sentence |
 | Booking, cancelling or deleting without consent | `approval_gate` needs a "yes" in a later message |
 | Messaging leads | `schedule_followup` only queues; the agency approves on the dashboard |
-| Cost / runaway loops | `max_tokens=700`, thinking off, cached system prompt, trimmed history, recursion limit 25, 45 s timeout, refusals skip the model |
+| Cost / runaway loops | `max_tokens=700`, thinking off, prompt caching, at most 5 model calls per turn, 45 s timeout, refusals skip the model |
+| Open endpoint abused to burn the key | Hourly and total dollar caps, stored in Postgres (`app/budget.py`) |
+| Default dashboard password | When deployed, the admin API stays closed until `ADMIN_TOKEN` is strong |
+| Instructions hidden in saved memory | Facts are short, checked by the guard, and shown to the model as data |
 | Errors | `/chat` never returns 500; broken threads are repaired so the next turn still works |
 
 ## Benchmark
@@ -150,19 +160,20 @@ POST /chat
 → {"reply": "…", "tool_calls": [{"name": "search_listings", "args": {…}}], "tokens": {"in": 812, "out": 143}}
 
 GET /health → ok
+GET /ready  → is the key, database and budget fine? (no tokens)
 ```
 `tokens` sums every model call in the turn; `tool_calls` lists the tools that actually ran.
 Website-only endpoints: `GET /listings`, `GET /admin/stats|leads|visits|followups`, `POST /admin/followups/{id}`,
-`POST /admin/sweep`.
+`POST /admin/sweep`, `GET /admin/usage`.
 
 ## Run it locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r backend/requirements.txt
+pip install -r backend/requirements-dev.txt
 cp .env.example backend/.env                          # add ANTHROPIC_API_KEY (DATABASE_URL optional locally)
 cd backend
-python check_model.py                                  # one real Claude call, shows raw errors
+python check_model.py                                  # two real Claude calls: errors shown raw, proves caching
 python run_local.py                                    # API on http://127.0.0.1:8000  (docs at /docs)
 pytest -q                                              # unit tests, no key needed
 ```
@@ -180,7 +191,9 @@ backend/
   app/graph.py       LangGraph: nodes, routing, approval gate
   app/tools.py       the 13 tools
   app/guard.py       safety rules                 app/approval.py   what counts as a yes
-  app/money.py       local money words            app/privacy.py    redaction
+  app/money.py       local money words            app/when.py       plain-word visit times
+  app/budget.py      costs and spend caps         app/privacy.py    redaction
+  app/ids.py         safe storage keys            app/replies.py    fixed replies (EN / Roman Urdu)
   app/followups.py   quiet-lead sweep
   app/prompts.py     system prompt
   app/repo.py        Neon Postgres + in-memory data access
@@ -199,11 +212,11 @@ PLAN.md              team plan and decisions      docs/DEPLOY.md step-by-step de
 |---|---|
 | Customer page + admin dashboard | `frontend/index.html`, `frontend/admin.html` |
 | FastAPI backend | `backend/app/main.py` |
-| LangGraph, 2+ nodes with distinct roles | `backend/app/graph.py` (8 nodes) |
+| LangGraph, 2+ nodes with distinct roles | `backend/app/graph.py` (9 nodes) |
 | 2+ real tools | `backend/app/tools.py` (13 tools on Postgres) |
 | Short-term memory by `thread_id` | `AsyncPostgresSaver`, `service.thread_key` |
 | Long-term memory by `user_id` | `AsyncPostgresStore` `("leads", user_id)` |
-| Multiple users isolated | context `user_id`, filtered queries, `user_id:thread_id` keys, tests |
+| Multiple users isolated | context `user_id`, filtered queries, collision-proof keys (`app/ids.py`), tests |
 | Safety + ask before risky actions | `guard.py`, `approval_gate`, follow-up approvals |
 | `POST /chat` + `GET /health` exact format | `backend/app/main.py`, `service.py` |
 | Model `claude-haiku-5-5` | `MODEL` env var (default) |
@@ -211,5 +224,12 @@ PLAN.md              team plan and decisions      docs/DEPLOY.md step-by-step de
 | 10 tests + 5 attacks, pass rate in README | `tests.json`, `attacks.json`, `run_bench.py` |
 | README: diagram, setup, GIF, benchmark, memory note | this file |
 | `.env.example`, no keys in code | `.env.example`, `.gitignore` |
+
+## Known limits
+
+- One server process (locks and the hourly cap live in memory); the total spend cap is in Postgres.
+- Off-topic requests that are not clear attacks are refused by the model, so they cost one small call.
+- Visit slots are computed (3 a day, 7 days ahead), not synced with a real calendar.
+- Approved follow-ups are marked approved; no SMS/WhatsApp sender is connected.
 
 Demo data is illustrative: 30 Islamabad listings modelled on typical Zameen.com prices.
