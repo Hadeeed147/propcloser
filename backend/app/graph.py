@@ -1,18 +1,19 @@
 r"""The PropCloser LangGraph.
 
 START -> guard -(blocked)-> refuse -> END
-             \-> load_profile -> closer -(safe tools)-> tools -> closer
-                                       -(risky tool)-> approval_gate -(lead said yes)-> tools
-                                                                     -(not yet)-> update_pipeline
-                                       -(no tools)-> update_pipeline -> END
+              \-> load_profile -(exact "yes" to a waiting action)-> confirm_fast -> tools
+                              \-> closer -(safe tools)-> tools -> load_profile -> closer ...
+                                         -(risky tool)-> approval_gate -(already said yes)-> tools
+                                                                       -(not yet: asks)-> update_pipeline
+                                         -(no tools)-> update_pipeline -> END
 
-Only `closer` calls the model. Everything else is plain code, so most turns cost one Haiku call.
+Only `closer` calls the model. Everything else is plain code.
 """
 from __future__ import annotations
 
 import logging
-import re
 from typing import Annotated, Literal, TypedDict
+from uuid import uuid4
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
@@ -24,30 +25,33 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from app import config
+from app.approval import is_exact_yes, is_yes
 from app.context import Ctx
 from app.guard import check_message, refusal_for
 from app.prompts import system_message
 from app.repo import get_repo, lead_status
-from app.tools import RISKY_TOOLS, TOOLS, read_profile
+from app.tools import RISKY_TOOLS, TOOLS, full_memory, visit_label
 
 log = logging.getLogger("propcloser")
 NOT_EXECUTED = "Not executed"
 EMPTY_REPLY = ("I can help you buy or rent property in Islamabad. "
                "Could you tell me the area, your budget and what kind of place you want?")
-YES = re.compile(r"\b(yes|yeah|yep|yup|confirm(ed)?|ok(ay)?|sure|book it|go ahead|done|haan|han|ji|jee|"
-                 r"theek hai|thik hai|kar do|kardo)\b", re.I)
-NO = re.compile(r"^\s*(no|nope)\b|\b(not now|cancel|don'?t book|nahi|nahin)\b", re.I)
+
+
+def keep_last(old, new):
+    """Reducer: when two tools in the same step write this key, the last write wins (LangGraph's default is to crash)."""
+    return new
+
+
+class State(TypedDict, total=False):
+    messages: Annotated[list[AnyMessage], add_messages]          # short-term memory (checkpointer)
+    lead_profile: dict                                           # long-term memory, reloaded after every tool step
+    pending_action: Annotated[dict | None, keep_last]            # a risky action waiting for the lead's yes
+    blocked_reason: str | None                                   # set by guard
 
 
 def human_turns(messages: list[AnyMessage]) -> int:
     return sum(isinstance(m, HumanMessage) for m in messages)
-
-
-class State(TypedDict, total=False):
-    messages: Annotated[list[AnyMessage], add_messages]   # short-term memory (checkpointer)
-    lead_profile: dict                                   # long-term memory, loaded each turn
-    pending_action: dict | None                          # a held visit waiting for the lead's yes
-    blocked_reason: str | None                           # set by guard
 
 
 def window(messages: list[AnyMessage], n: int) -> list[AnyMessage]:
@@ -62,6 +66,12 @@ def window(messages: list[AnyMessage], n: int) -> list[AnyMessage]:
 
 def last_human_text(messages: list[AnyMessage]) -> str:
     return next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+
+
+def waiting_since_earlier(state: State) -> dict | None:
+    """The pending action, but only if it was created by an EARLIER user message (you cannot pre-approve)."""
+    pending = state.get("pending_action")
+    return pending if pending and human_turns(state["messages"]) > pending["human_turn"] else None
 
 
 def make_model() -> ChatAnthropic:
@@ -86,7 +96,14 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
         return {"messages": [AIMessage(refusal_for(state.get("blocked_reason")))]}
 
     async def load_profile(state: State, runtime: Runtime[Ctx]) -> dict:
-        return {"lead_profile": await read_profile(runtime.store, runtime.context.user_id)}
+        return {"lead_profile": await full_memory(runtime.store, runtime.context.user_id)}
+
+    def confirm_fast(state: State) -> dict:
+        """The lead said exactly "yes": write the approved tool call ourselves and skip the model.
+        (The instructor's urgent_reading_guard does the same, so the model can never forget to act.)"""
+        pending = state["pending_action"]
+        call = {"name": pending["tool"], "args": pending["args"], "id": f"yes_{uuid4().hex[:10]}", "type": "tool_call"}
+        return {"messages": [AIMessage(content="", tool_calls=[call])]}
 
     async def closer(state: State) -> dict:
         system = system_message(state.get("lead_profile") or {}, state.get("pending_action"))
@@ -96,34 +113,55 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
             reply = AIMessage(EMPTY_REPLY, id=reply.id, usage_metadata=reply.usage_metadata)
         return {"messages": [reply]}
 
-    def approval_gate(state: State) -> Command[Literal["tools", "update_pipeline"]]:
-        """Human-in-the-loop without interrupt(): risky calls run only after the lead's explicit yes,
-        given in a LATER message than the one that created the pending visit."""
+    async def approval_gate(state: State, runtime: Runtime[Ctx]) -> Command[Literal["tools", "update_pipeline"]]:
+        """Human-in-the-loop without interrupt(): a risky call runs only after the lead's yes in a later message."""
         messages = state["messages"]
         last = messages[-1]
-        said = last_human_text(messages)
-        pending = state.get("pending_action")
-        if (pending and human_turns(messages) > pending.get("human_turn", 0)
-                and YES.search(said) and not NO.search(said)):
+        pending = waiting_since_earlier(state)
+
+        def approved(call) -> bool:
+            return bool(pending and pending["tool"] == call["name"] and pending["args"] == call["args"]
+                        and is_yes(last_human_text(messages), call["name"]))
+
+        risky = [c for c in last.tool_calls if c["name"] in RISKY_TOOLS]
+        if all(approved(c) for c in risky):
             return Command(goto="tools")
 
         safe = [c for c in last.tool_calls if c["name"] not in RISKY_TOOLS]
         if safe:
-            # Drop only the risky calls (same message id => replaced in history) and run the safe ones.
+            # Run the safe calls now; drop the risky ones (same message id => replaced in the history).
             safe_ids = {c["id"] for c in safe}
             content = last.content
             if isinstance(content, list):
                 content = [b for b in content if not (isinstance(b, dict) and b.get("type") == "tool_use"
                                                       and b.get("id") not in safe_ids)]
-            trimmed = AIMessage(content=content, tool_calls=safe, id=last.id,
-                                usage_metadata=last.usage_metadata, response_metadata=last.response_metadata)
-            return Command(goto="tools", update={"messages": [trimmed]})
+            return Command(goto="tools", update={"messages": [AIMessage(
+                content=content, tool_calls=safe, id=last.id, usage_metadata=last.usage_metadata,
+                response_metadata=last.response_metadata)]})
 
+        call = risky[0]
+        waiting = state.get("pending_action")
+        update: dict = {}
+        if call["name"] == "confirm_visit":
+            if waiting and waiting["tool"] == "confirm_visit":       # asking again now: the next message may answer it
+                update["pending_action"] = {**waiting, "human_turn": human_turns(messages)}
+            ask = (f"Just to confirm: shall I {waiting['summary']}? Reply \"yes\" (haan) to confirm."
+                   if waiting and waiting["tool"] == "confirm_visit"
+                   else "Which property and time would you like to visit? I'll check the free slots first.")
+        else:
+            if call["name"] == "cancel_visit":
+                visit = await get_repo().get_visit(runtime.context.user_id, call["args"].get("visit_id", 0))
+                if not visit or visit["status"] == "cancelled":
+                    return Command(goto="tools")                 # harmless: the tool answers "no such visit"
+                summary = f"cancel your visit to {visit_label(visit)}"
+            else:
+                summary = "delete everything I remember about you"
+            update["pending_action"] = {"tool": call["name"], "args": call["args"], "summary": summary,
+                                        "human_turn": human_turns(messages)}
+            ask = f"Just to confirm: shall I {summary}? Reply \"yes\" (haan) to confirm."
         skipped = [ToolMessage(f"{NOT_EXECUTED}: waiting for the lead to confirm.", tool_call_id=c["id"])
                    for c in last.tool_calls]
-        ask = (f"Just to confirm: shall I book {pending['summary']}? Reply \"yes\" to confirm." if pending
-               else "Which property and time would you like to visit? I'll check the free slots first.")
-        return Command(goto="update_pipeline", update={"messages": [*skipped, AIMessage(ask)]})
+        return Command(goto="update_pipeline", update={**update, "messages": [*skipped, AIMessage(ask)]})
 
     async def update_pipeline(state: State, runtime: Runtime[Ctx]) -> dict:
         repo = get_repo()
@@ -137,6 +175,15 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
     def route_after_guard(state: State) -> Literal["refuse", "load_profile"]:
         return "refuse" if state.get("blocked_reason") else "load_profile"
 
+    def route_after_load(state: State) -> Literal["confirm_fast", "closer"]:
+        last = state["messages"][-1]
+        pending = waiting_since_earlier(state)
+        # Only the message right after the question: a later "yes" may be answering something else.
+        answers_it = pending and human_turns(state["messages"]) == pending["human_turn"] + 1
+        if isinstance(last, HumanMessage) and answers_it and is_exact_yes(last.text):
+            return "confirm_fast"
+        return "closer"
+
     def route_after_closer(state: State) -> Literal["tools", "approval_gate", "update_pipeline"]:
         calls = getattr(state["messages"][-1], "tool_calls", None)
         if not calls:
@@ -147,6 +194,7 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
     g.add_node("guard", guard)
     g.add_node("refuse", refuse)
     g.add_node("load_profile", load_profile)
+    g.add_node("confirm_fast", confirm_fast)
     g.add_node("closer", closer)
     g.add_node("tools", ToolNode(TOOLS, handle_tool_errors=True))
     g.add_node("approval_gate", approval_gate)
@@ -155,8 +203,9 @@ def build_graph(llm: BaseChatModel | None = None, checkpointer=None, store=None)
     g.add_edge(START, "guard")
     g.add_conditional_edges("guard", route_after_guard, ["refuse", "load_profile"])
     g.add_edge("refuse", END)
-    g.add_edge("load_profile", "closer")
+    g.add_conditional_edges("load_profile", route_after_load, ["confirm_fast", "closer"])
+    g.add_edge("confirm_fast", "tools")
     g.add_conditional_edges("closer", route_after_closer, ["tools", "approval_gate", "update_pipeline"])
-    g.add_edge("tools", "closer")
+    g.add_edge("tools", "load_profile")
     g.add_edge("update_pipeline", END)
     return g.compile(checkpointer=checkpointer, store=store)

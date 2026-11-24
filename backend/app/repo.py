@@ -164,6 +164,19 @@ class MemoryRepo:
         visit["status"] = "confirmed"
         return visit
 
+    async def cancel_visit(self, user_id: str, visit_id: int, only_pending: bool = False) -> dict | None:
+        visit = next((v for v in self.visits if v["id"] == visit_id and v["user_id"] == user_id and v["status"]
+                      in (("pending",) if only_pending else ("pending", "confirmed"))), None)
+        if visit:
+            visit["status"] = "cancelled"
+        return visit
+
+    async def get_visit(self, user_id: str, visit_id: int) -> dict | None:
+        return next((v for v in await self.user_visits(user_id) if v["id"] == visit_id), None)
+
+    async def delete_lead(self, user_id: str):
+        self.leads.pop(user_id, None)
+
     async def user_visits(self, user_id: str) -> list[dict]:
         out = []
         for v in self.visits:
@@ -275,6 +288,17 @@ class PostgresRepo:
                 "returning *", (visit_id, user_id))
         except errors.UniqueViolation:      # someone else confirmed that slot first
             return None
+
+    async def cancel_visit(self, user_id: str, visit_id: int, only_pending: bool = False) -> dict | None:
+        allowed = ["pending"] if only_pending else ["pending", "confirmed"]
+        return await self._one("update visits set status = 'cancelled' where id = %s and user_id = %s "
+                               "and status = any(%s) returning *", (visit_id, user_id, allowed))
+
+    async def get_visit(self, user_id: str, visit_id: int) -> dict | None:
+        return next((v for v in await self.user_visits(user_id) if v["id"] == visit_id), None)
+
+    async def delete_lead(self, user_id: str):
+        await self._all("delete from leads where user_id = %s returning user_id", (user_id,))
 
     async def user_visits(self, user_id: str) -> list[dict]:
         return await self._all(

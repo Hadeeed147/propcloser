@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app import config
+from app.followups import sweep
 from app.graph import build_graph
 from app.repo import MemoryRepo, PostgresRepo, get_repo, search, set_repo
 from app.service import run_chat
@@ -140,6 +141,12 @@ async def admin_visits():
 @app.get("/admin/followups", dependencies=[Depends(require_admin)])
 async def admin_followups():
     return await get_repo().admin_followups()
+
+
+@app.post("/admin/sweep", dependencies=[Depends(require_admin)])
+async def sweep_quiet_leads(idle_hours: float = 24):
+    """Draft follow-ups for leads who went quiet. Drafts wait for approval; nothing is sent."""
+    return {"drafted": await sweep(get_repo(), idle_hours)}
 
 
 @app.post("/admin/followups/{followup_id}", dependencies=[Depends(require_admin)])

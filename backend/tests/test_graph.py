@@ -34,8 +34,7 @@ def test_booking_needs_a_later_yes(make_graph, repo):
         # turn 1: lead asks to book -> hold the slot, then ask
         call("request_visit", listing_id=2, slot=slot),
         call("confirm_visit"),                       # model jumps the gun: the gate must block it
-        # turn 2: lead says yes -> confirm
-        call("confirm_visit"),
+        # turn 2: lead says yes -> confirm_fast writes the call itself, the model only phrases the reply
         say("Booked! See you then."),
     ])
     first = chat(graph, "lead", "t", f"Book a visit to #2 at {slot}")
